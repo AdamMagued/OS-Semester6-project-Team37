@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <string.h>
-
+#include <stdbool.h>
 struct PcbDummy{
     int processID;
     char processState[10];
@@ -21,6 +21,20 @@ struct SchedulerInfo{
 
 
 };
+
+bool isFinished(struct PcbDummy pcbList[]){
+    bool flag=true;
+    for(int i=0;i<3;i++){
+        if(strcmp(pcbList[i].processState,"finished")!=0){
+            flag=false;
+        }
+    }
+    if(flag){
+        return true;
+    };
+    return false;
+
+}
 
 int main() {
     int i=0;
@@ -48,7 +62,7 @@ int main() {
 
     int n= sizeof(processList)/sizeof(processList[0]);
 
-    while(!isFinished()){
+    while(!isFinished(pcbList)){
         printf("current tick: %d\n", i);
         for(int j=0;j<n;j++){
             if(processList[j].arrivalTime==i&&strcmp(pcbList[processList[j].processID-1].processState,"waiting")==0){
