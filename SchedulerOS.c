@@ -30,7 +30,7 @@ int selectHRRN(int readyQueue[], int readyQueueSize, struct SchedulerInfo proces
 int main() {
     int i=0;
     int readyQueueSize=0;
-    int currentRunning=0;
+    int currentRunning=-1;
 
 
     struct  PcbDummy pcbList[] = {
@@ -58,6 +58,8 @@ int main() {
         printf("current tick: %d\n", i);
         for(int j=0;j<n;j++){
             if(processList[j].arrivalTime==i&&strcmp(pcbList[processList[j].processID-1].processState,"waiting")==0){
+                
+                printf("process %d has arrived\n", processList[j].processID);
                 readyQueue[readyQueueSize]=processList[j].processID;
                 strcpy(pcbList[processList[j].processID-1].processState,"ready");
                 readyQueueSize++;
@@ -76,6 +78,38 @@ int main() {
             //increments the waiting time each clock cycle for "ready" processes
 
         }
+
+        if(currentRunning==-1&&readyQueueSize>0){
+            bool foundCurrentRunning=false;
+            currentRunning=selectHRRN(readyQueue,readyQueueSize,processList);
+            strcpy(pcbList[currentRunning-1].processState,"running");
+            for(int m=0;m<readyQueueSize-1;m++){
+                if(readyQueue[m]==currentRunning){
+                    foundCurrentRunning=true;
+
+                }
+                if(foundCurrentRunning){
+
+                    readyQueue[m]=readyQueue[m+1];
+                }
+
+            }
+            readyQueueSize-=1;
+
+
+        }
+
+        if(currentRunning!=-1){
+            if(pcbList[currentRunning-1].programCounter==processList[currentRunning-1].burstTime){
+                strcpy(pcbList[currentRunning-1].processState,"finished");
+                printf("process %d has finished\n", currentRunning);
+                currentRunning=-1;
+            }else{
+            pcbList[currentRunning-1].programCounter+=1;}
+            
+        }
+
+
         i++;
 
 
@@ -117,6 +151,8 @@ int selectHRRN(int readyQueue[], int readyQueueSize, struct SchedulerInfo proces
 
 
 
+
+
      
 
      //we collected the waiting and bursttime nwo we do waitingTime + burstTime) / burstTime 
@@ -125,6 +161,7 @@ int selectHRRN(int readyQueue[], int readyQueueSize, struct SchedulerInfo proces
 
 
     }
+    printf("process %d has been selected to run\n", maxProcess);
 
     return maxProcess; 
 
