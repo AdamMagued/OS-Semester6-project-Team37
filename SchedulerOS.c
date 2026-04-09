@@ -19,6 +19,9 @@ struct SchedulerInfo {
 
 bool isFinished(struct PcbDummy pcbList[]);
 int selectHRRN(int readyQueue[], int readyQueueSize, struct SchedulerInfo processList[]);
+int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int queue1Size,int queue2Size,int queue3Size, int queue4Size, struct PcbDummy pcbList[], int *numberOfInstructionsRan, int processQueueLevel[] );
+void demoteProcess(int currentQueue[],int nextQueue[],int *currentQueueSize, int *nextQueueSize, int processQueueLevel[]);
+
 int runInstruction(int currentRunning, struct PcbDummy pcbList[], struct SchedulerInfo processList[]);
 
 int main() {
@@ -94,6 +97,7 @@ int main() {
         }
 
         else if (algo == 2) {
+            // ROUND ROBIN
             int runInstructionOutput;
             int tempProcessId;
 
@@ -124,6 +128,10 @@ int main() {
             }
 
             printf("Ready queue 0 has: %d\n", readyQueue[0]);
+        }
+
+        else if(algo==3){
+
         }
 
         i++;
@@ -174,3 +182,42 @@ int runInstruction(int currentRunning, struct PcbDummy pcbList[], struct Schedul
         return 1;
     }
 }
+
+
+
+
+
+int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int queue1Size,int queue2Size,int queue3Size, int queue4Size, struct PcbDummy pcbList[], int *numberOfInstructionsRan, int processQueueLevel[] ){
+
+
+}
+
+void demoteProcess(int currentQueue[],int nextQueue[],int *currentQueueSize, int *nextQueueSize, int processQueueLevel[]){
+    if(processQueueLevel[currentQueue[0]-1]!=3){ // if we are NOT in the last queue:
+    int tempProcId=currentQueue[0];
+    for(int i=0;i<*currentQueueSize-1;i++){
+        currentQueue[i]=currentQueue[i+1];
+    } // shift current queue to the left, overwrite current index 0
+    *currentQueueSize-=1; 
+    nextQueue[*nextQueueSize]=tempProcId; //place the demoted in end of next queue
+    *nextQueueSize+=1;
+processQueueLevel[tempProcId-1]++; //update the process queue level
+
+
+}
+    else{ // if we are in the last queue, we just place in back of current q
+        int tempProcId=currentQueue[0];
+    for(int i=0;i<*currentQueueSize-1;i++){
+        currentQueue[i]=currentQueue[i+1];
+    }
+    currentQueue[*currentQueueSize]=tempProcId;
+    
+
+
+
+    }
+
+
+
+}
+
