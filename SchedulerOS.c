@@ -19,12 +19,17 @@ struct SchedulerInfo {
 
 bool isFinished(struct PcbDummy pcbList[]);
 int selectHRRN(int readyQueue[], int readyQueueSize, struct SchedulerInfo processList[]);
-int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int queue1Size,int queue2Size,int queue3Size, int queue4Size, struct PcbDummy pcbList[], int *numberOfInstructionsRan, int processQueueLevel[] );
+int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Size,int *queue2Size,int *queue3Size, int *queue4Size, struct PcbDummy pcbList[],int processQueueLevel[], struct SchedulerInfo processList[], int *NIR2, int *NIR3, int *NIR4);
 void demoteProcess(int currentQueue[],int nextQueue[],int *currentQueueSize, int *nextQueueSize, int processQueueLevel[]);
+void rotateQueue4(int queue4[], int *queue4Size);
 
 int runInstruction(int currentRunning, struct PcbDummy pcbList[], struct SchedulerInfo processList[]);
 
 int main() {
+
+    int NIR2=0;
+    int NIR3=0;
+    int NIR4=0;
     int i = 0;
     int readyQueueSize = 0;
     int currentRunning = -1;
@@ -186,9 +191,112 @@ int runInstruction(int currentRunning, struct PcbDummy pcbList[], struct Schedul
 
 
 
+int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Size,int *queue2Size,int *queue3Size, int *queue4Size, struct PcbDummy pcbList[],int processQueueLevel[], struct SchedulerInfo processList[], int *NIR2, int *NIR3, int*NIR4){
+    
 
-int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int queue1Size,int queue2Size,int queue3Size, int queue4Size, struct PcbDummy pcbList[], int *numberOfInstructionsRan, int processQueueLevel[] ){
+    if(*queue1Size>0){
+        int tempProcId=queue1[0];
+        if(runInstruction(queue1[0], pcbList, processList)==0){
 
+            
+            //this means the instruction finished, so cycle the queue and remove it completely
+            for(int i=0;i<*queue1Size;i++){
+                queue1[i]=queue1[i+1];
+
+            }
+            *queue1Size--;
+            return tempProcId;
+        }
+        else{
+            
+            demoteProcess(queue1,queue2,queue1Size,queue2Size,processQueueLevel);
+            printf("process %d has been demoted",tempProcId);
+            return tempProcId;
+            
+        }
+
+    }
+    else if( *queue2Size>0){
+
+        int tempProcId=queue2[0];
+
+        if(runInstruction(queue2[0],pcbList,processList)==0){
+            for(int i=0;i<*queue2Size;i++){
+                queue2[i]=queue2[i+1];
+
+            }
+            *queue2Size--;
+            return tempProcId;
+
+        }else{
+            (*NIR2)++;
+            if(*NIR2==2){
+                demoteProcess(queue2,queue3,queue2Size,queue3Size,processQueueLevel);
+                *NIR2=0;
+                printf("process %d has been demoted",tempProcId);
+            return tempProcId;
+            }
+            return tempProcId;
+            
+        }
+
+} else if (*queue3Size>0){
+
+        int tempProcId=queue3[0];
+    if(runInstruction(queue3[0],pcbList,processList)==0){
+        for(int i=0;i<*queue3Size;i++){
+                queue3[i]=queue3[i+1];
+
+
+            }
+            *queue3Size--;
+
+            return tempProcId;
+
+
+    }
+    else{
+        (*NIR3)++;
+        if(*NIR3==4){
+            demoteProcess(queue3,queue4,queue3Size,queue4Size,processQueueLevel);
+            *NIR3=0;
+            printf("process %d has been demoted",tempProcId);
+            return tempProcId;
+
+        }
+        return tempProcId;
+        
+
+    }
+}else if(*queue4Size>0){
+
+        int tempProcId=queue4[0];
+    if(runInstruction(queue4[0],pcbList,processList)==0){
+        for(int i=0;i<*queue4Size;i++){
+                queue4[i]=queue4[i+1];
+
+            }
+            *queue4Size--;
+            return tempProcId;
+
+
+    }
+    else{
+        (*NIR4)++;
+        if(*NIR4==8){
+            rotateQueue4(queue4,queue4Size);
+            *NIR4=0;
+            printf("queue %d has been sent to the back of the queue",tempProcId);
+            return tempProcId;
+        }
+        return tempProcId;
+
+        
+    }
+
+
+}
+return -1;
 
 }
 
@@ -219,5 +327,13 @@ processQueueLevel[tempProcId-1]++; //update the process queue level
 
 
 
+}
+
+void rotateQueue4(int queue4[], int *queue4Size){
+    int tempProcId = queue4[0];
+    for(int i = 0; i < *queue4Size; i++){
+        queue4[i] = queue4[i+1];
+    }
+    queue4[*queue4Size - 1] = tempProcId;
 }
 
