@@ -35,6 +35,18 @@ int main() {
     int currentRunning = -1;
     int numberOfInstructionsRan = 0; // this variable is for the RR implementation to help
 
+    //these  nextdeclarations are for the MLFQ implementation
+
+    int queue1[3];
+    int queue2[3];
+    int queue3[3];
+    int queue4[3];
+    int queue1Size = 0;
+    int queue2Size = 0;
+    int queue3Size = 0;
+    int queue4Size = 0;
+    int processQueueLevel[3] = {0, 0, 0};
+
     struct PcbDummy pcbList[] = {
         {1, "waiting", 0, 0, 0},
         {2, "waiting", 0, 0, 0},
@@ -51,7 +63,7 @@ int main() {
     int n = sizeof(processList) / sizeof(processList[0]); // size of processlist
     int algo;
 
-    printf("Select your algorithm.\n Enter 1 for HRRN and 2 for RoundRobin\n");
+    printf("Select your algorithm.\n Enter 1 for HRRN and 2 for RoundRobin, 3 for MLFQ\n");
     scanf("%d", &algo);
 
     while (!isFinished(pcbList)) {
@@ -60,9 +72,18 @@ int main() {
         for (int j = 0; j < n; j++) {
             if (processList[j].arrivalTime == i && strcmp(pcbList[processList[j].processID - 1].processState, "waiting") == 0) {
                 printf("process %d has arrived\n", processList[j].processID);
+
+                if(algo==3){
+                    queue1[queue1Size]= processList[j].processID;
+                    strcpy(pcbList[processList[j].processID - 1].processState, "ready");
+                    queue1Size++;
+                }
+                
+                else{
+                
                 readyQueue[readyQueueSize] = processList[j].processID;
                 strcpy(pcbList[processList[j].processID - 1].processState, "ready");
-                readyQueueSize++;
+                readyQueueSize++;}
                 // the above line loops through the process list that has reached the arrival time, then it will check that the state is waiting
                 // it switches them to ready and adds them to readyqueue and increments readyqueuesize
             }
@@ -137,6 +158,8 @@ int main() {
 
         else if(algo==3){
 
+            selectMLFQ(queue1,queue2,queue3,queue4,&queue1Size,&queue2Size,&queue3Size,&queue4Size,pcbList,processQueueLevel,processList,&NIR2,&NIR3,&NIR4);
+
         }
 
         i++;
@@ -204,13 +227,13 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
                 queue1[i]=queue1[i+1];
 
             }
-            *queue1Size--;
+            (*queue1Size)--;
             return tempProcId;
         }
         else{
             
             demoteProcess(queue1,queue2,queue1Size,queue2Size,processQueueLevel);
-            printf("process %d has been demoted",tempProcId);
+            printf("process %d has been demoted\n",tempProcId);
             return tempProcId;
             
         }
@@ -225,7 +248,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
                 queue2[i]=queue2[i+1];
 
             }
-            *queue2Size--;
+            (*queue2Size)--;
             return tempProcId;
 
         }else{
@@ -233,7 +256,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
             if(*NIR2==2){
                 demoteProcess(queue2,queue3,queue2Size,queue3Size,processQueueLevel);
                 *NIR2=0;
-                printf("process %d has been demoted",tempProcId);
+                printf("process %d has been demoted\n",tempProcId);
             return tempProcId;
             }
             return tempProcId;
@@ -249,7 +272,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
 
 
             }
-            *queue3Size--;
+            (*queue3Size)--;
 
             return tempProcId;
 
@@ -260,7 +283,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
         if(*NIR3==4){
             demoteProcess(queue3,queue4,queue3Size,queue4Size,processQueueLevel);
             *NIR3=0;
-            printf("process %d has been demoted",tempProcId);
+            printf("process %d has been demoted\n",tempProcId);
             return tempProcId;
 
         }
@@ -276,7 +299,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
                 queue4[i]=queue4[i+1];
 
             }
-            *queue4Size--;
+            (*queue4Size)--;
             return tempProcId;
 
 
@@ -286,7 +309,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
         if(*NIR4==8){
             rotateQueue4(queue4,queue4Size);
             *NIR4=0;
-            printf("queue %d has been sent to the back of the queue",tempProcId);
+            printf("queue %d has been sent to the back of the queue\n",tempProcId);
             return tempProcId;
         }
         return tempProcId;
