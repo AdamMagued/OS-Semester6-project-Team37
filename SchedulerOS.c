@@ -22,6 +22,8 @@ int selectHRRN(int readyQueue[], int readyQueueSize, struct SchedulerInfo proces
 int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Size,int *queue2Size,int *queue3Size, int *queue4Size, struct PcbDummy pcbList[],int processQueueLevel[], struct SchedulerInfo processList[], int *NIR2, int *NIR3, int *NIR4);
 void demoteProcess(int currentQueue[],int nextQueue[],int *currentQueueSize, int *nextQueueSize, int processQueueLevel[]);
 void rotateQueue4(int queue4[], int *queue4Size);
+void printQueues(int readyQueue[], int readyQueueSize, int currentRunning);
+void printMLFQQueues(int queue1[], int queue1Size, int queue2[], int queue2Size, int queue3[], int queue3Size, int queue4[], int queue4Size, int currentRunning);
 
 int runInstruction(int currentRunning, struct PcbDummy pcbList[], struct SchedulerInfo processList[]);
 
@@ -35,7 +37,7 @@ int main() {
     int currentRunning = -1;
     int numberOfInstructionsRan = 0; // this variable is for the RR implementation to help
 
-    //these  nextdeclarations are for the MLFQ implementation
+    //these nextdeclarations are for the MLFQ implementation
 
     int queue1[3];
     int queue2[3];
@@ -78,9 +80,9 @@ int main() {
                     strcpy(pcbList[processList[j].processID - 1].processState, "ready");
                     queue1Size++;
                 }
-                
+
                 else{
-                
+
                 readyQueue[readyQueueSize] = processList[j].processID;
                 strcpy(pcbList[processList[j].processID - 1].processState, "ready");
                 readyQueueSize++;}
@@ -109,12 +111,15 @@ int main() {
                     }
                 }
                 readyQueueSize -= 1;
+                printf("Currently running: Process %d\n", currentRunning);
+                printQueues(readyQueue, readyQueueSize, currentRunning);
             }
 
             if (currentRunning != -1) {
                 if (pcbList[currentRunning - 1].programCounter == processList[currentRunning - 1].burstTime) {
                     strcpy(pcbList[currentRunning - 1].processState, "finished");
                     printf("process %d has finished\n", currentRunning);
+                    printQueues(readyQueue, readyQueueSize, -1);
                     currentRunning = -1;
                 } else {
                     pcbList[currentRunning - 1].programCounter += 1;
@@ -129,15 +134,16 @@ int main() {
 
             if (readyQueueSize > 0) {
                 currentRunning = readyQueue[0];
+                printf("Currently running: Process %d\n", currentRunning);
                 runInstructionOutput = runInstruction(readyQueue[0], pcbList, processList);
                 numberOfInstructionsRan++;
-                printf("no.instr ran %d\n", numberOfInstructionsRan);
 
                 if (runInstructionOutput == 0) {
                     for (int p = 0; p < readyQueueSize - 1; p++) {
                         readyQueue[p] = readyQueue[p + 1];
                     }
                     readyQueueSize -= 1;
+                    printQueues(readyQueue, readyQueueSize, currentRunning);
                     currentRunning = -1;
                     numberOfInstructionsRan = 0;
                 }
@@ -148,17 +154,19 @@ int main() {
                     }
                     readyQueue[readyQueueSize - 1] = tempProcessId;
                     // shift queue left and place process at back
+                    printQueues(readyQueue, readyQueueSize, currentRunning);
                     currentRunning = -1;
                     numberOfInstructionsRan = 0;
                 }
             }
 
-            printf("Ready queue 0 has: %d\n", readyQueue[0]);
         }
 
         else if(algo==3){
 
-            selectMLFQ(queue1,queue2,queue3,queue4,&queue1Size,&queue2Size,&queue3Size,&queue4Size,pcbList,processQueueLevel,processList,&NIR2,&NIR3,&NIR4);
+            currentRunning = selectMLFQ(queue1,queue2,queue3,queue4,&queue1Size,&queue2Size,&queue3Size,&queue4Size,pcbList,processQueueLevel,processList,&NIR2,&NIR3,&NIR4);
+            printf("Currently running: Process %d\n", currentRunning);
+            printMLFQQueues(queue1, queue1Size, queue2, queue2Size, queue3, queue3Size, queue4, queue4Size, currentRunning);
 
         }
 
@@ -211,17 +219,51 @@ int runInstruction(int currentRunning, struct PcbDummy pcbList[], struct Schedul
     }
 }
 
+void printQueues(int readyQueue[], int readyQueueSize, int currentRunning) {
+    printf("--- Queue Status ---\n");
+    printf("Ready Queue: [ ");
+    for (int i = 0; i < readyQueueSize; i++) {
+        printf("P%d ", readyQueue[i]);
+    }
+    printf("]\n");
+    printf("Blocked Queue: [ empty ]\n");
+    if (currentRunning != -1) {
+        printf("Currently Running: P%d\n", currentRunning);
+    } else {
+        printf("Currently Running: none\n");
+    }
+    printf("--------------------\n");
+}
 
-
+void printMLFQQueues(int queue1[], int queue1Size, int queue2[], int queue2Size, int queue3[], int queue3Size, int queue4[], int queue4Size, int currentRunning) {
+    printf("--- MLFQ Queue Status ---\n");
+    printf("Queue 1 (quantum 1): [ ");
+    for (int i = 0; i < queue1Size; i++) printf("P%d ", queue1[i]);
+    printf("]\n");
+    printf("Queue 2 (quantum 2): [ ");
+    for (int i = 0; i < queue2Size; i++) printf("P%d ", queue2[i]);
+    printf("]\n");
+    printf("Queue 3 (quantum 4): [ ");
+    for (int i = 0; i < queue3Size; i++) printf("P%d ", queue3[i]);
+    printf("]\n");
+    printf("Queue 4 (quantum 8): [ ");
+    for (int i = 0; i < queue4Size; i++) printf("P%d ", queue4[i]);
+    printf("]\n");
+    printf("Blocked Queue: [ empty ]\n");
+    if (currentRunning != -1) {
+        printf("Currently Running: P%d\n", currentRunning);
+    } else {
+        printf("Currently Running: none\n");
+    }
+    printf("-------------------------\n");
+}
 
 int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Size,int *queue2Size,int *queue3Size, int *queue4Size, struct PcbDummy pcbList[],int processQueueLevel[], struct SchedulerInfo processList[], int *NIR2, int *NIR3, int*NIR4){
-    
 
     if(*queue1Size>0){
         int tempProcId=queue1[0];
         if(runInstruction(queue1[0], pcbList, processList)==0){
 
-            
             //this means the instruction finished, so cycle the queue and remove it completely
             for(int i=0;i<*queue1Size;i++){
                 queue1[i]=queue1[i+1];
@@ -231,11 +273,11 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
             return tempProcId;
         }
         else{
-            
+
             demoteProcess(queue1,queue2,queue1Size,queue2Size,processQueueLevel);
             printf("process %d has been demoted\n",tempProcId);
             return tempProcId;
-            
+
         }
 
     }
@@ -260,7 +302,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
             return tempProcId;
             }
             return tempProcId;
-            
+
         }
 
 } else if (*queue3Size>0){
@@ -269,7 +311,6 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
     if(runInstruction(queue3[0],pcbList,processList)==0){
         for(int i=0;i<*queue3Size;i++){
                 queue3[i]=queue3[i+1];
-
 
             }
             (*queue3Size)--;
@@ -288,7 +329,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
 
         }
         return tempProcId;
-        
+
 
     }
 }else if(*queue4Size>0){
@@ -314,7 +355,7 @@ int selectMLFQ(int queue1[],int queue2[],int queue3[],int queue4[],int *queue1Si
         }
         return tempProcId;
 
-        
+
     }
 
 
@@ -329,11 +370,10 @@ void demoteProcess(int currentQueue[],int nextQueue[],int *currentQueueSize, int
     for(int i=0;i<*currentQueueSize-1;i++){
         currentQueue[i]=currentQueue[i+1];
     } // shift current queue to the left, overwrite current index 0
-    *currentQueueSize-=1; 
+    *currentQueueSize-=1;
     nextQueue[*nextQueueSize]=tempProcId; //place the demoted in end of next queue
     *nextQueueSize+=1;
 processQueueLevel[tempProcId-1]++; //update the process queue level
-
 
 }
     else{ // if we are in the last queue, we just place in back of current q
@@ -342,13 +382,8 @@ processQueueLevel[tempProcId-1]++; //update the process queue level
         currentQueue[i]=currentQueue[i+1];
     }
     currentQueue[*currentQueueSize]=tempProcId;
-    
-
-
 
     }
-
-
 
 }
 
@@ -359,4 +394,3 @@ void rotateQueue4(int queue4[], int *queue4Size){
     }
     queue4[*queue4Size - 1] = tempProcId;
 }
-
