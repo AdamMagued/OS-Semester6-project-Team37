@@ -1,101 +1,46 @@
 /**
  * syscalls.h - System Calls Interface
- * Team Member: System Calls Implementer
- * 
- * This file declares all system call functions that processes use
- * to request OS services.
+ *
+ * System calls provide the interface between processes and OS services.
+ * The interpreter calls these functions when a process requests
+ * hardware access (screen, keyboard, disk).
+ *
+ * Memory read/write system calls are provided by memory.h
+ * (getVariable / setVariable).
  */
 
 #ifndef SYSCALLS_H
 #define SYSCALLS_H
 
-// ============== MEMORY WORD STRUCTURE ==============
-// This must match what the Memory teammate defines
-typedef struct {
-    int processID;           // Which process owns this variable (-1 if empty)
-    char varName[32];        // Variable name (e.g., "x", "a", "b")
-    char value[256];         // Variable value (string or number as string)
-} MemoryWord;
-
-// ============== SYSTEM CALLS ==============
-
 /**
- * Get user input from keyboard
- * Called when program has "assign x input"
- * Note: semWait/semSignal for userInput is handled by interpreter/mutex teammate
- * 
- * @return String entered by user (caller must free with free())
+ * Print text to the screen (userOutput resource).
+ * @param text  String to display
  */
-char* sys_input(void);
+void sys_print(const char *text);
 
 /**
- * Write data to a file on disk
- * Called when program has "writeFile filename data"
- * Note: semWait/semSignal for file is handled by interpreter/mutex teammate
- * 
- * @param filename Path/name of file to create/write to
- * @param data     String to write to the file
+ * Read text input from the user (userInput resource).
+ * Prints "Please enter a value: " prompt, then reads one token.
+ * @param buffer      Destination buffer
+ * @param bufferSize  Size of the destination buffer
+ */
+void sys_input(char *buffer, int bufferSize);
+
+/**
+ * Write data to a file on disk (file resource).
+ * @param filename  Path/name of file to create/overwrite
+ * @param data      String to write
  * @return 0 on success, -1 on error
  */
-int sys_writeFile(const char* filename, const char* data);
+int sys_writeFile(const char *filename, const char *data);
 
 /**
- * Read entire contents of a file from disk
- * Called when program has "assign var readFile filename"
- * Note: semWait/semSignal for file is handled by interpreter/mutex teammate
- * 
- * @param filename Path/name of file to read
- * @return File contents as string (caller must free with free())
- *         Returns empty string "" if file cannot be opened
+ * Read entire contents of a file from disk (file resource).
+ * @param filename    Path/name of file to read
+ * @param buffer      Destination buffer for file contents
+ * @param bufferSize  Size of the destination buffer
+ * @return 0 on success, -1 on error
  */
-char* sys_readFile(const char* filename);
-
-/**
- * Print text to the screen
- * Called when program has "print variable"
- * Note: semWait/semSignal for userOutput is handled by interpreter/mutex teammate
- * 
- * @param text String to print to console
- */
-void sys_print(const char* text);
-
-// ============== MEMORY OPERATIONS ==============
-// These work with the Memory teammate's global memory array
-
-/**
- * Write a variable value to simulated memory
- * 
- * @param processID ID of the process owning this variable
- * @param varName   Name of the variable (e.g., "x", "a", "b")
- * @param value     Value to store (as string)
- */
-void sys_memWrite(int processID, const char* varName, const char* value);
-
-/**
- * Read a variable value from simulated memory
- * 
- * @param processID ID of the process owning this variable
- * @param varName   Name of the variable to read
- * @return Value as string (caller must free with free())
- *         Returns empty string "" if variable not found
- */
-char* sys_memRead(int processID, const char* varName);
-
-/**
- * Initialize memory (called once at OS startup)
- * Sets all memory words to empty state
- */
-void sys_memInit(void);
-
-/**
- * Print memory contents (for debugging)
- * Called by scheduler to show memory state
- */
-void sys_memPrint(void);
-
-// ============== GLOBAL MEMORY ARRAY ==============
-// This will be defined in syscalls.c
-// Other teammates can access it using "extern MemoryWord memory[40];"
-extern MemoryWord memory[40];
+int sys_readFile(const char *filename, char *buffer, int bufferSize);
 
 #endif /* SYSCALLS_H */

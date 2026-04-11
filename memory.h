@@ -39,6 +39,7 @@ typedef struct {
     PCB pcb;
     int isSwappedOut;
     int isCreated;
+    int quantumUsed;   /* MLFQ: instructions used in current quantum */
 } Process;
 
 /* ── Scheduler Tracking ── */

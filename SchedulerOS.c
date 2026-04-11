@@ -7,7 +7,7 @@
 
 /* ── Forward Declarations ── */
 bool isFinished(Process processes[], int n);
-int  selectHRRN(int readyQueue[], int readyQueueSize, SchedulerInfo processList[]);
+int  selectHRRN(int readyQueue[], int readyQueueSize, SchedulerInfo processList[], Process processes[]);
 void removeFromQueue(int queue[], int *queueSize, int pid);
 void demoteProcess(int currentQueue[], int nextQueue[],
                    int *currentQueueSize, int *nextQueueSize,
@@ -31,11 +31,11 @@ int main() {
     initMutexes();
 
     /* ── Program files and arrival times ── */
-    char *programFiles[] = {"Program_1.txt", "Program_2.txt", "Program_3.txt"};
+    char *programFiles[] = {"Program 1.txt", "Program_2.txt", "Program_3.txt"};
     int arrivalTimes[] = {0, 1, 4};
     int n = 3;
 
-    /* ── Initialize processes (load code but don't allocate memory yet) ── */
+    /* ── Initialize process structs (programs loaded at arrival time) ── */
     Process processes[MAX_PROCESSES];
     memset(processes, 0, sizeof(processes));
 
@@ -47,11 +47,7 @@ int main() {
         strcpy(processes[i].pcb.state, "NEW");
         processes[i].isCreated = 0;
         processes[i].isSwappedOut = 0;
-
-        if (loadProgram(&processes[i], programFiles[i]) < 0) {
-            printf("FATAL: Failed to load %s\n", programFiles[i]);
-            return 1;
-        }
+        processes[i].quantumUsed = 0;
     }
 
     /* ── Scheduler tracking info ── */
@@ -77,7 +73,6 @@ int main() {
     int queue1Size = 0, queue2Size = 0, queue3Size = 0, queue4Size = 0;
     int processQueueLevel[MAX_PROCESSES];
     memset(processQueueLevel, 0, sizeof(processQueueLevel));
-    int NIR2 = 0, NIR3 = 0, NIR4 = 0;
 
     /* ── Algorithm selection ── */
     int algo;
@@ -98,10 +93,29 @@ int main() {
         printf("║         Clock Cycle: %-4d         ║\n", tick);
         printf("╚═══════════════════════════════════╝\n");
 
-        /* ── 1. Check for process arrivals ── */
+        /* ── 1. Update waiting times for processes already in ready queue ── */
+        /*    (before arrivals, so new arrivals don't get an extra tick)   */
+        if (algo != 3) {
+            for (int k = 0; k < readyQueueSize; k++) {
+                int pid = readyQueue[k];
+                if (pid != currentRunning) {
+                    processList[pid - 1].waitingTime++;
+                }
+            }
+        }
+
+        /* ── 2. Check for process arrivals ── */
         for (int j = 0; j < n; j++) {
             if (processList[j].arrivalTime == tick && !processes[j].isCreated) {
                 printf(">> Process %d has ARRIVED\n", processes[j].id);
+
+                /* Load program file at arrival time (not before simulation) */
+                if (loadProgram(&processes[j], programFiles[j]) < 0) {
+                    printf("[OS ERROR] Failed to load %s\n", programFiles[j]);
+                    strcpy(processes[j].pcb.state, "FINISHED");
+                    continue;
+                }
+                processList[j].burstTime = processes[j].codeLineCount;
 
                 int result = allocateProcess(&processes[j]);
                 if (result == -1) {
@@ -139,16 +153,6 @@ int main() {
             }
         }
 
-        /* ── 2. Update waiting times for processes in ready queue ── */
-        if (algo != 3) {
-            for (int k = 0; k < readyQueueSize; k++) {
-                int pid = readyQueue[k];
-                if (pid != currentRunning) {
-                    processList[pid - 1].waitingTime++;
-                }
-            }
-        }
-
         /* ── 3. Reset unblockedPID before execution ── */
         unblockedPID = -1;
 
@@ -161,11 +165,9 @@ int main() {
 
             if (currentRunning == -1 && readyQueueSize > 0) {
                 /* Select process with highest response ratio */
-                currentRunning = selectHRRN(readyQueue, readyQueueSize, processList);
+                currentRunning = selectHRRN(readyQueue, readyQueueSize, processList, processes);
                 removeFromQueue(readyQueue, &readyQueueSize, currentRunning);
                 strcpy(processes[currentRunning - 1].pcb.state, "RUNNING");
-
-                ensureInMemory(currentRunning, processes, n, currentRunning);
 
                 printf(">> Process %d selected to run (HRRN)\n", currentRunning);
                 printQueues(readyQueue, readyQueueSize,
@@ -293,54 +295,61 @@ int main() {
                     if (execResult == EXEC_FINISHED) {
                         strcpy(processes[currentRunning - 1].pcb.state, "FINISHED");
                         freeProcess(&processes[currentRunning - 1]);
+                        processes[selectedPID - 1].quantumUsed = 0;
                         printf(">> Process %d has FINISHED (memory freed)\n", currentRunning);
                         switch (selectedQueue) {
                             case 1: removeFromQueue(queue1, &queue1Size, selectedPID); break;
-                            case 2: removeFromQueue(queue2, &queue2Size, selectedPID); NIR2 = 0; break;
-                            case 3: removeFromQueue(queue3, &queue3Size, selectedPID); NIR3 = 0; break;
-                            case 4: removeFromQueue(queue4, &queue4Size, selectedPID); NIR4 = 0; break;
+                            case 2: removeFromQueue(queue2, &queue2Size, selectedPID); break;
+                            case 3: removeFromQueue(queue3, &queue3Size, selectedPID); break;
+                            case 4: removeFromQueue(queue4, &queue4Size, selectedPID); break;
                         }
                     }
                     else if (execResult == EXEC_BLOCKED) {
                         strcpy(processes[currentRunning - 1].pcb.state, "BLOCKED");
                         blockedQueueArr[blockedQueueSize++] = currentRunning;
+                        processes[selectedPID - 1].quantumUsed = 0;
                         printf(">> Process %d is BLOCKED\n", currentRunning);
                         switch (selectedQueue) {
                             case 1: removeFromQueue(queue1, &queue1Size, selectedPID); break;
-                            case 2: removeFromQueue(queue2, &queue2Size, selectedPID); NIR2 = 0; break;
-                            case 3: removeFromQueue(queue3, &queue3Size, selectedPID); NIR3 = 0; break;
-                            case 4: removeFromQueue(queue4, &queue4Size, selectedPID); NIR4 = 0; break;
+                            case 2: removeFromQueue(queue2, &queue2Size, selectedPID); break;
+                            case 3: removeFromQueue(queue3, &queue3Size, selectedPID); break;
+                            case 4: removeFromQueue(queue4, &queue4Size, selectedPID); break;
                         }
                     }
                     else {
+                        /* Per-process quantum tracking */
+                        processes[selectedPID - 1].quantumUsed++;
+
                         if (selectedQueue == 1) {
+                            /* Q1 quantum = 1 (2^0): always demote after 1 instruction */
                             demoteProcess(queue1, queue2, &queue1Size, &queue2Size,
                                          processQueueLevel);
+                            processes[selectedPID - 1].quantumUsed = 0;
                             printf(">> Process %d demoted from Q1 to Q2\n", selectedPID);
                         }
                         else if (selectedQueue == 2) {
-                            NIR2++;
-                            if (NIR2 >= 2) {
+                            /* Q2 quantum = 2 (2^1) */
+                            if (processes[selectedPID - 1].quantumUsed >= 2) {
                                 demoteProcess(queue2, queue3, &queue2Size, &queue3Size,
                                              processQueueLevel);
-                                NIR2 = 0;
+                                processes[selectedPID - 1].quantumUsed = 0;
                                 printf(">> Process %d demoted from Q2 to Q3\n", selectedPID);
                             }
                         }
                         else if (selectedQueue == 3) {
-                            NIR3++;
-                            if (NIR3 >= 4) {
+                            /* Q3 quantum = 4 (2^2) */
+                            if (processes[selectedPID - 1].quantumUsed >= 4) {
                                 demoteProcess(queue3, queue4, &queue3Size, &queue4Size,
                                              processQueueLevel);
-                                NIR3 = 0;
+                                processes[selectedPID - 1].quantumUsed = 0;
                                 printf(">> Process %d demoted from Q3 to Q4\n", selectedPID);
                             }
                         }
                         else if (selectedQueue == 4) {
-                            NIR4++;
-                            if (NIR4 >= 8) {
+                            /* Q4 quantum = 8 (2^3): RR rotation */
+                            if (processes[selectedPID - 1].quantumUsed >= 8) {
                                 rotateQueue4(queue4, &queue4Size);
-                                NIR4 = 0;
+                                processes[selectedPID - 1].quantumUsed = 0;
                                 printf(">> Process %d rotated in Q4\n", selectedPID);
                             }
                         }
@@ -420,13 +429,14 @@ bool isFinished(Process processes[], int n) {
     return true;
 }
 
-int selectHRRN(int readyQueue[], int readyQueueSize, SchedulerInfo processList[]) {
-    float maxRatio = 0;
-    int maxProcess = 0;
+int selectHRRN(int readyQueue[], int readyQueueSize, SchedulerInfo processList[], Process processes[]) {
+    float maxRatio = -1;
+    int maxProcess = readyQueue[0];
     for (int i = 0; i < readyQueueSize; i++) {
         int pid = readyQueue[i];
         int wt = processList[pid - 1].waitingTime;
-        int bt = processList[pid - 1].burstTime;
+        int bt = processes[pid - 1].codeLineCount - processes[pid - 1].pcb.programCounter;
+        if (bt <= 0) bt = 1; /* safety: avoid division by zero */
         float ratio = (float)(wt + bt) / bt;
         if (ratio > maxRatio) {
             maxRatio = ratio;

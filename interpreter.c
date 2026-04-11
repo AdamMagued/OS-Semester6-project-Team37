@@ -1,5 +1,6 @@
 #include "interpreter.h"
 #include "mutex.h"
+#include "syscalls.h"
 
 #define MAX_ARGS 10
 #define ARG_LENGTH 256
@@ -56,11 +57,24 @@ int executeInstruction(Process *p) {
     else if (strcmp(cmd, "assign") == 0) {
         if (argCount >= 2 && strcmp(args[1], "input") == 0) {
             char input[VALUE_LENGTH];
-            printf("Please enter a value: ");
-            fflush(stdout);
-            if (scanf("%s", input) != 1) strcpy(input, "");
+            sys_input(input, VALUE_LENGTH);
             setVariable(p, args[0], input);
             printf("  -> %s = %s\n", args[0], input);
+        } else if (argCount >= 3 && strcmp(args[1], "readFile") == 0) {
+            /* assign x readFile y — read file named by variable y, store in x */
+            char *filename = getVariable(p, args[2]);
+            if (filename) {
+                char content[VALUE_LENGTH];
+                if (sys_readFile(filename, content, VALUE_LENGTH) == 0) {
+                    setVariable(p, args[0], content);
+                    printf("  -> %s = (contents of '%s')\n", args[0], filename);
+                } else {
+                    setVariable(p, args[0], "");
+                    printf("  -> %s = (file read error)\n", args[0]);
+                }
+            } else {
+                printf("  [ERROR] Variable '%s' not found for readFile\n", args[2]);
+            }
         } else if (argCount >= 2) {
             setVariable(p, args[0], args[1]);
             printf("  -> %s = %s\n", args[0], args[1]);
@@ -69,53 +83,46 @@ int executeInstruction(Process *p) {
     else if (strcmp(cmd, "print") == 0) {
         char *val = getVariable(p, args[0]);
         if (val != NULL)
-            printf("  [OUTPUT] %s\n", val);
+            sys_print(val);
         else
-            printf("  [OUTPUT] %s\n", args[0]);
+            sys_print(args[0]);
     }
     else if (strcmp(cmd, "printFromTo") == 0) {
         char *v1 = getVariable(p, args[0]);
         char *v2 = getVariable(p, args[1]);
         int x = v1 ? atoi(v1) : 0;
         int y = v2 ? atoi(v2) : 0;
-        printf("  [OUTPUT] Numbers from %d to %d:\n", x, y);
+        char buf[32];
         if (x <= y) {
-            for (int i = x; i <= y; i++) printf("  %d\n", i);
+            for (int i = x; i <= y; i++) {
+                sprintf(buf, "%d", i);
+                sys_print(buf);
+            }
         } else {
-            for (int i = x; i >= y; i--) printf("  %d\n", i);
+            for (int i = x; i >= y; i--) {
+                sprintf(buf, "%d", i);
+                sys_print(buf);
+            }
         }
     }
     else if (strcmp(cmd, "writeFile") == 0) {
         char *filename = getVariable(p, args[0]);
         char *data = getVariable(p, args[1]);
         if (filename && data) {
-            FILE *fp = fopen(filename, "w");
-            if (fp) {
-                fprintf(fp, "%s", data);
-                fclose(fp);
-                printf("  [FILE] Wrote to '%s': %s\n", filename, data);
-            } else {
-                printf("  [FILE ERROR] Cannot write to '%s'\n", filename);
-            }
+            sys_writeFile(filename, data);
         } else {
-            printf("  [FILE ERROR] Variable not found for writeFile\n");
+            printf("  [ERROR] Variable not found for writeFile\n");
         }
     }
     else if (strcmp(cmd, "readFile") == 0) {
         char *filename = getVariable(p, args[0]);
         if (filename) {
-            FILE *fp = fopen(filename, "r");
-            if (fp) {
-                char content[VALUE_LENGTH];
-                size_t bytes = fread(content, 1, VALUE_LENGTH - 1, fp);
-                content[bytes] = '\0';
-                fclose(fp);
-                printf("  [FILE] Contents of '%s':\n  %s\n", filename, content);
-            } else {
-                printf("  [FILE ERROR] Cannot read '%s'\n", filename);
+            char content[VALUE_LENGTH];
+            if (sys_readFile(filename, content, VALUE_LENGTH) == 0) {
+                sys_print(content);
             }
         } else {
-            printf("  [FILE ERROR] Variable not found for readFile\n");
+            printf("  [ERROR] Variable not found for readFile\n");
         }
     }
     else {

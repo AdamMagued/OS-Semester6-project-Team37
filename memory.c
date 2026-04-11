@@ -167,6 +167,7 @@ void swapOut(Process *p) {
     disk[diskSlot].isOccupied = 1;
 
     printf("[OS] >>> Process %d SWAPPED OUT to disk (slot %d) <<<\n", p->id, diskSlot);
+    printDisk();
 
     freeProcess(p);
     p->isSwappedOut = 1;
@@ -224,6 +225,7 @@ int swapIn(Process *p) {
 
     printf("[OS] >>> Process %d SWAPPED IN from disk (slot %d) to memory [%d-%d] <<<\n",
            p->id, diskSlot, start, start + blockSize - 1);
+    printDisk();
     return start;
 }
 
