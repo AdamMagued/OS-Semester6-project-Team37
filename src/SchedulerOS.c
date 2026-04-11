@@ -438,12 +438,10 @@ static void stepSimulation(void) {
     printf("╚═══════════════════════════════════╝\n");
 
     /* ── 1. Update waiting times (before arrivals, so they don't count) ── */
-    if (g_algo != 3) {
-        for (int k = 0; k < g_readyQueueSize; k++) {
-            int pid = g_readyQueue[k];
-            if (pid != g_currentRunning)
-                g_processList[pid - 1].waitingTime++;
-        }
+    for (int k = 0; k < g_readyQueueSize; k++) {
+        int pid = g_readyQueue[k];
+        if (pid != g_currentRunning)
+            g_processList[pid - 1].waitingTime++;
     }
 
     /* ── 2. Process arrivals ─────────────────────────────────────── */

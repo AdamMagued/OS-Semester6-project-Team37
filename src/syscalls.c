@@ -40,6 +40,7 @@ void sys_clearInputQueue(void) {
 void sys_input(char *buffer, int bufferSize) {
     if (s_inputCount > 0) {
         /* Dequeue the next pre-supplied value */
+        printf("Please enter a value\n");
         strncpy(buffer, s_inputQ[s_inputHead], bufferSize - 1);
         buffer[bufferSize - 1] = '\0';
         s_inputHead = (s_inputHead + 1) % SYS_INPUT_QUEUE_CAP;
