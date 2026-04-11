@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SimOS — OS Scheduler Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/main.css" />
+  <link rel="stylesheet" href="css/memory.css" />
+  <link rel="stylesheet" href="css/scheduler.css" />
+  <link rel="stylesheet" href="css/inspector.css" />
+  <link rel="stylesheet" href="css/log.css" />
+</head>
+<body>
+
+  <!-- ════════════════ CONTROLS BAR ════════════════ -->
+  <header id="controls-bar">
+    <div id="controls-title">SimOS</div>
+    <div id="controls-right">
+      <button id="btn-step"  class="ctrl-btn">STEP</button>
+      <button id="btn-run"   class="ctrl-btn ctrl-btn--primary">RUN</button>
+      <button id="btn-pause" class="ctrl-btn" disabled>PAUSE</button>
+      <button id="btn-reset" class="ctrl-btn ctrl-btn--danger">RESET</button>
+      <span class="ctrl-sep"></span>
+      <label class="ctrl-label" for="speed-slider">SPEED</label>
+      <input type="range" id="speed-slider" min="1" max="10" value="1" />
+      <span id="speed-value" class="ctrl-readout">1x</span>
+      <span class="ctrl-sep"></span>
+      <label class="ctrl-label" for="algo-select">ALGO</label>
+      <select id="algo-select">
+        <option value="RR" selected>RR</option>
+        <option value="HRRN">HRRN</option>
+        <option value="MLFQ">MLFQ (bonus)</option>
+      </select>
+      <label class="ctrl-label" for="quantum-input">QUANTUM</label>
+      <input type="number" id="quantum-input" value="2" min="1" max="16" />
+      <span class="ctrl-sep"></span>
+      <button id="btn-load" class="ctrl-btn">LOAD JSON</button>
+    </div>
+  </header>
+
+  <!-- ════════════════ MAIN 3-COLUMN GRID ════════════════ -->
+  <main id="main-grid">
+
+    <!-- MEMORY PANEL -->
+    <section id="panel-memory" class="panel">
+      <div class="panel-label">[ MEMORY ]</div>
+      <div id="memory-grid"><!-- populated by memory.js --></div>
+      <div class="panel-sublabel">[ DISK ]</div>
+      <div id="disk-list"><!-- populated by memory.js --></div>
+      <!-- Drag handle on the right edge for panel resizing -->
+      <div id="memory-resize-handle" title="Drag to resize"></div>
+    </section>
+
+    <!-- SCHEDULER PANEL -->
+    <section id="panel-scheduler" class="panel">
+      <div class="panel-label">[ SCHEDULER ]</div>
+
+      <div id="sched-running-wrap">
+        <div class="sched-section-label">RUNNING</div>
+        <div id="running-card"><!-- populated by scheduler.js --></div>
+        <div id="timeslice-track">
+          <div id="timeslice-bar"></div>
+        </div>
+      </div>
+
+      <div id="sched-ready-wrap">
+        <div class="sched-section-label">READY QUEUE</div>
+        <div id="ready-queue"><!-- populated by scheduler.js --></div>
+      </div>
+
+      <div id="sched-blocked-wrap">
+        <div class="sched-section-label">BLOCKED QUEUE</div>
+        <div id="blocked-queue"><!-- populated by scheduler.js --></div>
+      </div>
+    </section>
+
+    <!-- INSPECTOR PANEL -->
+    <section id="panel-inspector" class="panel">
+      <div class="panel-label">[ PROCESS ]</div>
+      <div id="inspector-body">
+        <div id="inspector-empty">click a process to inspect</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ════════════════ LOG PANEL ════════════════ -->
+  <section id="panel-log" class="panel">
+    <div class="panel-label">[ LOG ]</div>
+    <div id="clock-badge">CLK&nbsp;<span id="clock-display">0</span></div>
+    <div id="log-entries"><!-- populated by log.js --></div>
+  </section>
+
+  <!-- ════════════════ LOAD JSON MODAL ════════════════ -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal-box">
+      <div class="modal-title">LOAD STATE JSON</div>
+      <textarea id="modal-textarea" spellcheck="false"
+        placeholder='{ "clock": 0, "algorithm": "RR", "timeSlice": 2, ... }'></textarea>
+      <div class="modal-actions">
+        <button id="modal-cancel"  class="ctrl-btn">CANCEL</button>
+        <button id="modal-confirm" class="ctrl-btn ctrl-btn--primary">LOAD</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ SCRIPTS ════════════════ -->
+  <script src="js/state.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/memory.js"></script>
+  <script src="js/scheduler.js"></script>
+  <script src="js/inspector.js"></script>
+  <script src="js/log.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

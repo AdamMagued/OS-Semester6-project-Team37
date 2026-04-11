@@ -15,7 +15,39 @@ void sys_print(const char *text) {
     fflush(stdout);
 }
 
+/* ── Input queue for HTTP-server mode ───────────────────────────
+   sys_pushInput() pre-loads values; sys_input() dequeues them.
+   Falls back to stdin when the queue is empty.
+   ────────────────────────────────────────────────────────────── */
+#define SYS_INPUT_QUEUE_CAP 64
+static char s_inputQ[SYS_INPUT_QUEUE_CAP][256];
+static int  s_inputHead  = 0;
+static int  s_inputCount = 0;
+
+void sys_pushInput(const char *value) {
+    if (s_inputCount >= SYS_INPUT_QUEUE_CAP) return;   /* queue full, drop */
+    int tail = (s_inputHead + s_inputCount) % SYS_INPUT_QUEUE_CAP;
+    strncpy(s_inputQ[tail], value, 255);
+    s_inputQ[tail][255] = '\0';
+    s_inputCount++;
+}
+
+void sys_clearInputQueue(void) {
+    s_inputHead  = 0;
+    s_inputCount = 0;
+}
+
 void sys_input(char *buffer, int bufferSize) {
+    if (s_inputCount > 0) {
+        /* Dequeue the next pre-supplied value */
+        strncpy(buffer, s_inputQ[s_inputHead], bufferSize - 1);
+        buffer[bufferSize - 1] = '\0';
+        s_inputHead = (s_inputHead + 1) % SYS_INPUT_QUEUE_CAP;
+        s_inputCount--;
+        printf("  [INPUT] auto-supplied: %s\n", buffer);
+        return;
+    }
+    /* Fall back to stdin when no pre-supplied value is available */
     printf("Please enter a value: ");
     fflush(stdout);
     char temp[256];

@@ -1,24 +1,28 @@
-CC = gcc
-CFLAGS = -Wall -g
-OBJS = SchedulerOS.o memory.o mutex.o interpreter.o
-TARGET = os_sim
+CC      = gcc
+CFLAGS  = -Wall -Wextra -g
+SRCDIR  = src
+BINDIR  = bin
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+SRCS    = $(SRCDIR)/SchedulerOS.c \
+          $(SRCDIR)/memory.c \
+          $(SRCDIR)/interpreter.c \
+          $(SRCDIR)/mutex.c \
+          $(SRCDIR)/syscalls.c
 
-SchedulerOS.o: SchedulerOS.c memory.h mutex.h interpreter.h
-	$(CC) $(CFLAGS) -c SchedulerOS.c
+TARGET  = $(BINDIR)/scheduler
 
-memory.o: memory.c memory.h
-	$(CC) $(CFLAGS) -c memory.c
+.PHONY: all clean run
 
-mutex.o: mutex.c mutex.h memory.h
-	$(CC) $(CFLAGS) -c mutex.c
+all: $(BINDIR) $(TARGET)
 
-interpreter.o: interpreter.c interpreter.h memory.h mutex.h
-	$(CC) $(CFLAGS) -c interpreter.c
+$(BINDIR):
+	mkdir -p $(BINDIR)
+
+$(TARGET): $(SRCS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+run: all
+	./$(TARGET)
 
 clean:
-	rm -f *.o $(TARGET)
-
-.PHONY: clean
+	rm -rf $(BINDIR)

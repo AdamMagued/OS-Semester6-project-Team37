@@ -43,4 +43,16 @@ int sys_writeFile(const char *filename, const char *data);
  */
 int sys_readFile(const char *filename, char *buffer, int bufferSize);
 
+/**
+ * Push a pre-supplied value into the input queue so that the next
+ * sys_input() call dequeues it instead of blocking on stdin.
+ * Used by the HTTP server when the frontend supplies an input value.
+ */
+void sys_pushInput(const char *value);
+
+/**
+ * Discard all queued input values.  Called on simulation reset.
+ */
+void sys_clearInputQueue(void);
+
 #endif /* SYSCALLS_H */
