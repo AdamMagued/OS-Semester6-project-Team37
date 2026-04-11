@@ -1,0 +1,6 @@
+semWait userInput
+assign x input
+semSignal userInput
+semWait file
+readFile x
+semSignal file
