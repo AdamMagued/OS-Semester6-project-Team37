@@ -73,6 +73,7 @@ static int queue1[MAX_PROCESSES], queue2[MAX_PROCESSES];
 static int queue3[MAX_PROCESSES], queue4[MAX_PROCESSES];
 static int queue1Size = 0, queue2Size = 0, queue3Size = 0, queue4Size = 0;
 static int processQueueLevel[MAX_PROCESSES]; // 0=Q1 1=Q2 2=Q3 3=Q4, indexed by pid-1
+static int prevMLFQRunner = -1; // tracks who ran LAST tick (for waiting time)
 
 // JSON serialisation buffer
 static char jsonBuf[JSON_BUF_SIZE];
@@ -465,6 +466,7 @@ static void initSimulation(void) {
     blockedQueueSize = 0;
     numberOfInstructionsRan = 0;
     queue1Size = queue2Size = queue3Size = queue4Size = 0;
+    prevMLFQRunner = -1;
     logCount = 0;
     memset(processQueueLevel, 0, sizeof(processQueueLevel));
 
@@ -505,13 +507,15 @@ static void stepSimulation(void) {
 
     // 1. update waiting times (before arrivals so they don't count)
     if (algo == 3) {
-        // MLFQ: ready processes live in queue1-queue4
+        // MLFQ: currentRunning is always -1 here (reset each tick).
+        // Use prevMLFQRunner — the PID that actually RAN last tick —
+        // so that we don't count its last-tick execution as waiting.
         int *qs[4] = { queue1, queue2, queue3, queue4 };
         int  sz[4] = { queue1Size, queue2Size, queue3Size, queue4Size };
         for (int qi = 0; qi < 4; qi++)
             for (int k = 0; k < sz[qi]; k++) {
                 int pid = qs[qi][k];
-                if (pid != currentRunning)
+                if (pid != prevMLFQRunner)
                     processList[pid - 1].waitingTime++;
             }
     } else {
@@ -821,6 +825,7 @@ static void stepSimulation(void) {
                 printMLFQQueues(queue1, queue1Size, queue2, queue2Size,
                                 queue3, queue3Size, queue4, queue4Size,
                                 blockedQueue, blockedQueueSize, currentRunning);
+                prevMLFQRunner = currentRunning; // remember who ran for next-tick wait calc
                 currentRunning = -1; // MLFQ re-selects each tick
             }
         }
