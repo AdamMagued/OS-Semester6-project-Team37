@@ -1,21 +1,17 @@
-/**
- * SchedulerOS.c
- * ─────────────────────────────────────────────────────────────────
- * OS scheduler simulation with a built-in HTTP/1.1 server.
- *
- * Usage:
- *   ./bin/scheduler [1|2|3]              server mode on :8080
- *   ./bin/scheduler --standalone [1|2|3] run full simulation, print to stdout
- *
- * HTTP endpoints (all return application/json + CORS headers):
- *   GET  /api/state   → current simulation state
- *   POST /api/step    → advance one clock tick, return new state
- *                       body (optional): {"input":"<value>"}
- *   POST /api/reset   → reset simulation, return initial state
- *                       body (optional): {"algo":<1|2|3>,
- *                         "quantum":<1-16>, "arrivals":[t0,t1,t2]}
- * ─────────────────────────────────────────────────────────────────
- */
+// SchedulerOS.c
+// OS scheduler simulation with built-in HTTP/1.1 server.
+//
+// Usage:
+//   ./bin/scheduler [1|2|3]              server mode on :8080
+//   ./bin/scheduler --standalone [1|2|3] run full simulation, print to stdout
+//
+// HTTP endpoints (all return application/json + CORS headers):
+//   GET  /api/state   -> current simulation state
+//   POST /api/step    -> advance one clock tick, return new state
+//                        body (optional): {"input":"<value>"}
+//   POST /api/reset   -> reset simulation, return initial state
+//                        body (optional): {"algo":<1|2|3>,
+//                          "quantum":<1-16>, "arrivals":[t0,t1,t2]}
 
 #include "memory.h"
 #include "mutex.h"
@@ -30,109 +26,110 @@
 #include <unistd.h>
 #include <errno.h>
 
-/* ═══════════════════════════ CONSTANTS ════════════════════════════ */
+// constants
 #define HTTP_PORT       8080
-#define MAX_LOG         200          /* ring-buffer cap for log entries */
+#define MAX_LOG         200
 #define LOG_EVENT_LEN   256
 #define LOG_TYPE_LEN    32
-#define JSON_BUF_SIZE   (192 * 1024) /* 192 KB – more than enough */
+#define JSON_BUF_SIZE   (192 * 1024)
 #define HTTP_RX_BUF     8192
 
-/* ══════════════════════════ LOG ENTRY ════════════════════════════ */
+// log entry
 typedef struct {
-    int  clock;
-    int  pid;                       /* -1 for system-level events */
+    int clock;
+    int pid;           // -1 for system-level events
     char event[LOG_EVENT_LEN];
-    char type[LOG_TYPE_LEN];        /* scheduling|blocking|memory-swap|execution|finish */
+    char type[LOG_TYPE_LEN]; // scheduling|blocking|memory-swap|execution|finish
 } LogEntry;
 
-/* ════════════════════════ GLOBAL SIM STATE ════════════════════════ */
-static LogEntry      g_log[MAX_LOG];
-static int           g_logCount      = 0;
+// -------- global simulation state --------
 
-static int           g_tick          = 0;
-static int           g_algo          = 2;   /* 1=HRRN 2=RR 3=MLFQ */
-static int           g_quantum       = 2;   /* RR time quantum (runtime-configurable) */
-static int           g_simFinished   = 0;
-static int           g_runningPid    = -1;  /* PID shown in RUNNING card */
+static LogEntry logEntries[MAX_LOG];
+static int logCount = 0;
 
-static int           g_n             = 3;
-static const char   *g_programFiles[MAX_PROCESSES];
-static int           g_arrivalTimes[MAX_PROCESSES];
+static int tick = 0;
+static int algo = 2;              // 1=HRRN 2=RR 3=MLFQ
+static int quantum = 2;           // RR time quantum (runtime-configurable)
+static int simFinished = 0;
+static int runningPid = -1;       // PID shown in RUNNING card
 
-static Process       g_processes[MAX_PROCESSES];
-static SchedulerInfo g_processList[MAX_PROCESSES];
+static int n = 3;
+static const char *programFiles[MAX_PROCESSES];
+static int arrivalTimes[MAX_PROCESSES];
 
-/* RR / HRRN queues */
-static int  g_readyQueue[MAX_PROCESSES];
-static int  g_readyQueueSize   = 0;
-static int  g_blockedQueue[MAX_PROCESSES];
-static int  g_blockedQueueSize = 0;
-static int  g_currentRunning   = -1;
-static int  g_niRan            = 0;   /* instructions run this quantum (RR) */
+static Process processes[MAX_PROCESSES];
+static SchedulerInfo processList[MAX_PROCESSES];
 
-/* MLFQ queues */
-static int  g_q1[MAX_PROCESSES], g_q2[MAX_PROCESSES];
-static int  g_q3[MAX_PROCESSES], g_q4[MAX_PROCESSES];
-static int  g_q1sz = 0, g_q2sz = 0, g_q3sz = 0, g_q4sz = 0;
-static int  g_pLevel[MAX_PROCESSES]; /* 0=Q1 1=Q2 2=Q3 3=Q4, indexed by pid-1 */
+// RR / HRRN queues
+static int readyQueue[MAX_PROCESSES];
+static int readyQueueSize = 0;
+static int blockedQueue[MAX_PROCESSES];
+static int blockedQueueSize = 0;
+static int currentRunning = -1;
+static int numberOfInstructionsRan = 0; // for RR quantum tracking
 
-/* JSON serialisation buffer */
-static char s_jsonBuf[JSON_BUF_SIZE];
+// MLFQ queues
+static int queue1[MAX_PROCESSES], queue2[MAX_PROCESSES];
+static int queue3[MAX_PROCESSES], queue4[MAX_PROCESSES];
+static int queue1Size = 0, queue2Size = 0, queue3Size = 0, queue4Size = 0;
+static int processQueueLevel[MAX_PROCESSES]; // 0=Q1 1=Q2 2=Q3 3=Q4, indexed by pid-1
 
-/* ═══════════════════════ FORWARD DECLARATIONS ═════════════════════ */
-bool isFinished(Process procs[], int n);
-int  selectHRRN(int rq[], int rqsz, SchedulerInfo pl[], Process procs[]);
+// JSON serialisation buffer
+static char jsonBuf[JSON_BUF_SIZE];
+
+// -------- forward declarations --------
+
+bool isFinished(Process procs[], int count);
+int selectHRRN(int rq[], int rqsz, SchedulerInfo pl[], Process procs[]);
 void removeFromQueue(int q[], int *sz, int pid);
-void demoteProcess(int cq[], int nq[], int *csz, int *nsz, int pql[]);
-void rotateQueue4(int q4[], int *sz);
+void demoteProcess(int currentQueue[], int nextQueue[], int *currentQueueSize, int *nextQueueSize, int pql[]);
+void rotateQueue4(int q4[], int *q4sz);
 void printQueues(int rq[], int rqsz, int bq[], int bqsz, int cr);
 void printMLFQQueues(int q1[], int q1sz, int q2[], int q2sz,
                      int q3[], int q3sz, int q4[], int q4sz,
                      int bq[], int bqsz, int cr);
-int  ensureInMemory(int pid, Process procs[], int n, int cr);
+int ensureInMemory(int pid, Process procs[], int count, int cr);
 
-/* ═════════════════════════ LOG HELPERS ════════════════════════════ */
+// -------- log helpers --------
 
 static void addLog(int pid, const char *event, const char *type) {
-    if (g_logCount >= MAX_LOG) {
-        /* Ring: drop oldest entry */
-        memmove(&g_log[0], &g_log[1], (MAX_LOG - 1) * sizeof(LogEntry));
-        g_logCount = MAX_LOG - 1;
+    if (logCount >= MAX_LOG) {
+        // ring buffer: drop oldest entry
+        memmove(&logEntries[0], &logEntries[1], (MAX_LOG - 1) * sizeof(LogEntry));
+        logCount = MAX_LOG - 1;
     }
-    g_log[g_logCount].clock = g_tick;
-    g_log[g_logCount].pid   = pid;
-    strncpy(g_log[g_logCount].event, event, LOG_EVENT_LEN - 1);
-    g_log[g_logCount].event[LOG_EVENT_LEN - 1] = '\0';
-    strncpy(g_log[g_logCount].type, type, LOG_TYPE_LEN - 1);
-    g_log[g_logCount].type[LOG_TYPE_LEN - 1] = '\0';
-    g_logCount++;
+    logEntries[logCount].clock = tick;
+    logEntries[logCount].pid = pid;
+    strncpy(logEntries[logCount].event, event, LOG_EVENT_LEN - 1);
+    logEntries[logCount].event[LOG_EVENT_LEN - 1] = '\0';
+    strncpy(logEntries[logCount].type, type, LOG_TYPE_LEN - 1);
+    logEntries[logCount].type[LOG_TYPE_LEN - 1] = '\0';
+    logCount++;
 }
 
-/* ═════════════════════ NEEDS-INPUT CHECK ═════════════════════════ */
-/* Returns the PID of a process whose next instruction is "assign … input"
-   while the input queue is empty.  Returns -1 if no input is needed.
-   Checks the currently running process (or next to run). */
+// -------- needs-input check --------
+// Returns the PID of a process whose next instruction is "assign ... input"
+// while the input queue is empty. Returns -1 if no input is needed.
+
 static int checkNeedsInput(void) {
     if (!sys_inputQueueEmpty()) return -1;
 
-    /* Determine which PID will execute next */
+    // determine which PID will execute next
     int nextPid = -1;
-    if (g_algo == 3) {
-        if      (g_q1sz > 0) nextPid = g_q1[0];
-        else if (g_q2sz > 0) nextPid = g_q2[0];
-        else if (g_q3sz > 0) nextPid = g_q3[0];
-        else if (g_q4sz > 0) nextPid = g_q4[0];
-    } else if (g_algo == 2) {
-        if (g_readyQueueSize > 0) nextPid = g_readyQueue[0];
-    } else if (g_algo == 1) {
-        nextPid = g_currentRunning;
-        /* If no one is running, check all ready processes — any could be
-           selected by HRRN, so flag if ANY of them need input. */
+    if (algo == 3) {
+        if      (queue1Size > 0) nextPid = queue1[0];
+        else if (queue2Size > 0) nextPid = queue2[0];
+        else if (queue3Size > 0) nextPid = queue3[0];
+        else if (queue4Size > 0) nextPid = queue4[0];
+    } else if (algo == 2) {
+        if (readyQueueSize > 0) nextPid = readyQueue[0];
+    } else if (algo == 1) {
+        nextPid = currentRunning;
+        // if no one is running, check all ready processes
         if (nextPid == -1) {
-            for (int k = 0; k < g_readyQueueSize; k++) {
-                int pid = g_readyQueue[k];
-                Process *pp = &g_processes[pid - 1];
+            for (int k = 0; k < readyQueueSize; k++) {
+                int pid = readyQueue[k];
+                Process *pp = &processes[pid - 1];
                 if (!pp->isCreated || pp->isSwappedOut) continue;
                 int ppc = pp->pcb.programCounter;
                 if (ppc >= pp->codeLineCount) continue;
@@ -144,30 +141,29 @@ static int checkNeedsInput(void) {
                     if (strcmp(r, "input") == 0) { nextPid = pid; break; }
                 }
             }
-            if (nextPid != -1) return nextPid; /* early return — already checked instruction */
+            if (nextPid != -1) return nextPid;
         }
     }
     if (nextPid <= 0) return -1;
 
-    Process *p = &g_processes[nextPid - 1];
+    Process *p = &processes[nextPid - 1];
     if (!p->isCreated || p->isSwappedOut) return -1;
     if (strcmp(p->pcb.state, "FINISHED") == 0) return -1;
 
     int pc = p->pcb.programCounter;
     if (pc >= p->codeLineCount) return -1;
 
-    /* Check if the instruction is "assign <var> input" */
+    // check if the instruction is "assign <var> input"
     const char *instr = p->codeLines[pc];
     if (strncmp(instr, "assign ", 7) != 0) return -1;
-    /* Find the second token after "assign <var> " */
     const char *q = instr + 7;
-    while (*q && *q != ' ' && *q != '\t') q++;  /* skip var name */
-    while (*q == ' ' || *q == '\t') q++;          /* skip whitespace */
+    while (*q && *q != ' ' && *q != '\t') q++;  // skip var name
+    while (*q == ' ' || *q == '\t') q++;          // skip whitespace
     if (strcmp(q, "input") == 0) return nextPid;
     return -1;
 }
 
-/* ═════════════════════════ JSON HELPERS ═══════════════════════════ */
+// -------- JSON helpers --------
 
 static void jsonEsc(const char *src, char *dst, int cap) {
     int j = 0;
@@ -191,10 +187,10 @@ static void strLower(const char *src, char *dst, int cap) {
     dst[i] = '\0';
 }
 
-/* Returns the PID that owns memory slot `idx`, or -1 if free/unknown. */
+// returns the PID that owns memory slot idx, or -1 if free
 static int slotPid(int idx) {
-    for (int i = 0; i < g_n; i++) {
-        Process *p = &g_processes[i];
+    for (int i = 0; i < n; i++) {
+        Process *p = &processes[i];
         if (!p->isCreated || p->isSwappedOut) continue;
         if (strcmp(p->pcb.state, "FINISHED") == 0) continue;
         if (idx >= p->pcb.lowerBound && idx <= p->pcb.upperBound)
@@ -203,7 +199,7 @@ static int slotPid(int idx) {
     return -1;
 }
 
-/* Returns the mutex resource name `pid` is blocked on, or "" if none. */
+// returns the mutex resource name that pid is blocked on, or "" if none
 static const char *blockedOn(int pid) {
     for (int i = 0; i < NUM_MUTEXES; i++)
         for (int j = 0; j < mutexes[i].waitCount; j++)
@@ -212,32 +208,32 @@ static const char *blockedOn(int pid) {
     return "";
 }
 
-/* ═══════════════════════ SERIALIZE STATE ══════════════════════════ */
+// -------- serialize state to JSON --------
 
 char *serializeState(void) {
     int pos = 0;
     char e1[512], e2[512], st[32];
 
 #define AP(fmt, ...) do { \
-    int _n = snprintf(s_jsonBuf + pos, JSON_BUF_SIZE - pos, fmt, ##__VA_ARGS__); \
+    int _n = snprintf(jsonBuf + pos, JSON_BUF_SIZE - pos, fmt, ##__VA_ARGS__); \
     if (_n > 0 && _n < JSON_BUF_SIZE - pos) pos += _n; \
 } while(0)
 
-    const char *algoStr = (g_algo == 1) ? "HRRN" :
-                          (g_algo == 2) ? "RR"   : "MLFQ";
-    int tsSlice = g_quantum;
+    const char *algoStr = (algo == 1) ? "HRRN" :
+                          (algo == 2) ? "RR"   : "MLFQ";
+    int tsSlice = quantum;
 
     AP("{");
-    AP("\"clock\":%d,", g_tick);
+    AP("\"clock\":%d,", tick);
     AP("\"algorithm\":\"%s\",", algoStr);
     AP("\"timeSlice\":%d,", tsSlice);
 
-    if (g_runningPid != -1)
-        AP("\"runningPid\":%d,", g_runningPid);
+    if (runningPid != -1)
+        AP("\"runningPid\":%d,", runningPid);
     else
         AP("\"runningPid\":null,");
 
-    /* ── needsInput — tells frontend to prompt user ────────────── */
+    // needsInput — tells frontend to prompt user
     {
         int nip = checkNeedsInput();
         if (nip != -1)
@@ -246,14 +242,14 @@ char *serializeState(void) {
             AP("\"needsInput\":false,\"needsInputPid\":null,");
     }
 
-    /* ── readyQueue ─────────────────────────────────────────────── */
+    // readyQueue
     AP("\"readyQueue\":[");
     {
         int first = 1;
-        if (g_algo == 3) {
-            /* MLFQ: merge all levels, Q1 (highest) first */
-            int *qs[4] = { g_q1,   g_q2,   g_q3,   g_q4   };
-            int  sz[4] = { g_q1sz, g_q2sz, g_q3sz, g_q4sz };
+        if (algo == 3) {
+            // MLFQ: merge all levels, Q1 (highest) first
+            int *qs[4] = { queue1, queue2, queue3, queue4 };
+            int  sz[4] = { queue1Size, queue2Size, queue3Size, queue4Size };
             for (int qi = 0; qi < 4; qi++)
                 for (int k = 0; k < sz[qi]; k++) {
                     if (!first) AP(",");
@@ -261,31 +257,31 @@ char *serializeState(void) {
                     first = 0;
                 }
         } else {
-            for (int k = 0; k < g_readyQueueSize; k++) {
+            for (int k = 0; k < readyQueueSize; k++) {
                 if (!first) AP(",");
-                AP("%d", g_readyQueue[k]);
+                AP("%d", readyQueue[k]);
                 first = 0;
             }
         }
     }
     AP("],");
 
-    /* ── blockedQueue ───────────────────────────────────────────── */
+    // blockedQueue
     AP("\"blockedQueue\":[");
-    for (int k = 0; k < g_blockedQueueSize; k++) {
+    for (int k = 0; k < blockedQueueSize; k++) {
         if (k > 0) AP(",");
-        int pid = g_blockedQueue[k];
+        int pid = blockedQueue[k];
         jsonEsc(blockedOn(pid), e1, sizeof(e1));
         AP("{\"pid\":%d,\"resource\":\"%s\"}", pid, e1);
     }
     AP("],");
 
-    /* ── processes ──────────────────────────────────────────────── */
+    // processes
     AP("\"processes\":[");
     {
         int first = 1;
-        for (int i = 0; i < g_n; i++) {
-            Process *p = &g_processes[i];
+        for (int i = 0; i < n; i++) {
+            Process *p = &processes[i];
             if (!p->isCreated) continue;
             if (!first) AP(",");
             first = 0;
@@ -302,18 +298,18 @@ char *serializeState(void) {
             AP("\"memStart\":%d,",    memS);
             AP("\"memEnd\":%d,",      memE);
 
-            /* queueLevel — MLFQ only */
-            if (g_algo == 3)
-                AP("\"queueLevel\":%d,", g_pLevel[i] + 1);
+            // queueLevel — MLFQ only
+            if (algo == 3)
+                AP("\"queueLevel\":%d,", processQueueLevel[i] + 1);
             else
                 AP("\"queueLevel\":null,");
 
-            AP("\"waitingTime\":%d,", g_processList[i].waitingTime);
+            AP("\"waitingTime\":%d,", processList[i].waitingTime);
 
-            /* responseRatio — HRRN only: (W_i + e_i) / e_i with e_i = total burst */
-            if (g_algo == 1) {
-                int wt = g_processList[i].waitingTime;
-                int bt = p->codeLineCount;  /* total burst (e_i) */
+            // responseRatio — HRRN only: (W + BT) / BT with BT = total burst
+            if (algo == 1) {
+                int wt = processList[i].waitingTime;
+                int bt = p->codeLineCount;
                 if (bt <= 0) bt = 1;
                 float rr = (float)(wt + bt) / bt;
                 AP("\"responseRatio\":%.2f,", rr);
@@ -321,7 +317,7 @@ char *serializeState(void) {
                 AP("\"responseRatio\":null,");
             }
 
-            /* vars — read from RAM or disk */
+            // vars — read from RAM or disk
             AP("\"vars\":[");
             {
                 int fv = 1;
@@ -355,7 +351,7 @@ char *serializeState(void) {
             }
             AP("],");
 
-            /* instructions */
+            // instructions
             AP("\"instructions\":[");
             for (int j = 0; j < p->codeLineCount; j++) {
                 if (j > 0) AP(",");
@@ -364,7 +360,7 @@ char *serializeState(void) {
             }
             AP("],");
 
-            /* heldMutexes */
+            // heldMutexes
             AP("\"heldMutexes\":[");
             {
                 int fm = 1;
@@ -380,7 +376,7 @@ char *serializeState(void) {
     }
     AP("],");
 
-    /* ── memory ─────────────────────────────────────────────────── */
+    // memory
     AP("\"memory\":[");
     for (int i = 0; i < MEMORY_SIZE; i++) {
         if (i > 0) AP(",");
@@ -396,7 +392,7 @@ char *serializeState(void) {
     }
     AP("],");
 
-    /* ── disk ───────────────────────────────────────────────────── */
+    // disk
     AP("\"disk\":[");
     {
         int first = 1;
@@ -411,18 +407,18 @@ char *serializeState(void) {
     }
     AP("],");
 
-    /* ── log ────────────────────────────────────────────────────── */
+    // log
     AP("\"log\":[");
-    for (int i = 0; i < g_logCount; i++) {
+    for (int i = 0; i < logCount; i++) {
         if (i > 0) AP(",");
-        jsonEsc(g_log[i].event, e1, sizeof(e1));
-        jsonEsc(g_log[i].type,  e2, sizeof(e2));
+        jsonEsc(logEntries[i].event, e1, sizeof(e1));
+        jsonEsc(logEntries[i].type,  e2, sizeof(e2));
         AP("{\"clock\":%d,\"pid\":%d,\"event\":\"%s\",\"type\":\"%s\"}",
-           g_log[i].clock, g_log[i].pid, e1, e2);
+           logEntries[i].clock, logEntries[i].pid, e1, e2);
     }
     AP("],");
 
-    /* ── mutexes ────────────────────────────────────────────────── */
+    // mutexes
     AP("\"mutexes\":{");
     for (int i = 0; i < NUM_MUTEXES; i++) {
         if (i > 0) AP(",");
@@ -440,54 +436,54 @@ char *serializeState(void) {
         }
         AP("]}");
     }
-    AP("}");   /* close mutexes */
+    AP("}");
 
-    AP("}");   /* close root */
+    AP("}");
 #undef AP
-    return s_jsonBuf;
+    return jsonBuf;
 }
 
-/* ═══════════════════════ INIT / RESET ════════════════════════════ */
+// -------- init / reset --------
 
 static void initSimulation(void) {
-    g_programFiles[0] = "programs/program1.txt";
-    g_programFiles[1] = "programs/program2.txt";
-    g_programFiles[2] = "programs/program3.txt";
-    g_arrivalTimes[0] = 0;
-    g_arrivalTimes[1] = 1;
-    g_arrivalTimes[2] = 4;
-    g_n = 3;
+    programFiles[0] = "programs/program1.txt";
+    programFiles[1] = "programs/program2.txt";
+    programFiles[2] = "programs/program3.txt";
+    arrivalTimes[0] = 0;
+    arrivalTimes[1] = 1;
+    arrivalTimes[2] = 4;
+    n = 3;
 
     initMemory();
     initMutexes();
 
-    g_tick           = 0;
-    g_simFinished    = 0;
-    g_runningPid     = -1;
-    g_currentRunning = -1;
-    g_readyQueueSize  = 0;
-    g_blockedQueueSize = 0;
-    g_niRan          = 0;
-    g_q1sz = g_q2sz = g_q3sz = g_q4sz = 0;
-    g_logCount       = 0;
-    memset(g_pLevel, 0, sizeof(g_pLevel));
+    tick = 0;
+    simFinished = 0;
+    runningPid = -1;
+    currentRunning = -1;
+    readyQueueSize = 0;
+    blockedQueueSize = 0;
+    numberOfInstructionsRan = 0;
+    queue1Size = queue2Size = queue3Size = queue4Size = 0;
+    logCount = 0;
+    memset(processQueueLevel, 0, sizeof(processQueueLevel));
 
-    for (int i = 0; i < g_n; i++) {
-        g_processes[i].id              = i + 1;
-        g_processes[i].arrivalTime     = g_arrivalTimes[i];
-        g_processes[i].pcb.processId   = i + 1;
-        g_processes[i].pcb.programCounter = 0;
-        strcpy(g_processes[i].pcb.state, "NEW");
-        g_processes[i].isCreated       = 0;
-        g_processes[i].isSwappedOut    = 0;
-        g_processes[i].quantumUsed     = 0;
-        g_processes[i].codeLineCount   = 0;
+    for (int i = 0; i < n; i++) {
+        processes[i].id = i + 1;
+        processes[i].arrivalTime = arrivalTimes[i];
+        processes[i].pcb.processId = i + 1;
+        processes[i].pcb.programCounter = 0;
+        strcpy(processes[i].pcb.state, "NEW");
+        processes[i].isCreated = 0;
+        processes[i].isSwappedOut = 0;
+        processes[i].quantumUsed = 0;
+        processes[i].codeLineCount = 0;
 
-        g_processList[i].processID     = i + 1;
-        g_processList[i].arrivalTime   = g_arrivalTimes[i];
-        g_processList[i].burstTime     = 0;
-        g_processList[i].waitingTime   = 0;
-        g_processList[i].finishTick    = 0;
+        processList[i].processID = i + 1;
+        processList[i].arrivalTime = arrivalTimes[i];
+        processList[i].burstTime = 0;
+        processList[i].waitingTime = 0;
+        processList[i].finishTick = 0;
     }
 }
 
@@ -496,422 +492,412 @@ static void resetSimulation(void) {
     initSimulation();
 }
 
-/* ═══════════════════════ STEP SIMULATION ══════════════════════════ */
+// -------- step simulation (one clock cycle) --------
 
 static void stepSimulation(void) {
-    if (g_simFinished) return;
+    if (simFinished) return;
 
     char evtBuf[LOG_EVENT_LEN];
 
     printf("\n╔═══════════════════════════════════╗\n");
-    printf("║         Clock Cycle: %-4d         ║\n", g_tick);
+    printf("║         Clock Cycle: %-4d         ║\n", tick);
     printf("╚═══════════════════════════════════╝\n");
 
-    /* ── 1. Update waiting times (before arrivals, so they don't count) ── */
-    if (g_algo == 3) {
-        /* MLFQ: ready processes live in g_q1–g_q4 */
-        int *qs[4] = { g_q1,   g_q2,   g_q3,   g_q4   };
-        int  sz[4] = { g_q1sz, g_q2sz, g_q3sz, g_q4sz };
+    // 1. update waiting times (before arrivals so they don't count)
+    if (algo == 3) {
+        // MLFQ: ready processes live in queue1-queue4
+        int *qs[4] = { queue1, queue2, queue3, queue4 };
+        int  sz[4] = { queue1Size, queue2Size, queue3Size, queue4Size };
         for (int qi = 0; qi < 4; qi++)
             for (int k = 0; k < sz[qi]; k++) {
                 int pid = qs[qi][k];
-                if (pid != g_currentRunning)
-                    g_processList[pid - 1].waitingTime++;
+                if (pid != currentRunning)
+                    processList[pid - 1].waitingTime++;
             }
     } else {
-        for (int k = 0; k < g_readyQueueSize; k++) {
-            int pid = g_readyQueue[k];
-            if (pid != g_currentRunning)
-                g_processList[pid - 1].waitingTime++;
+        for (int k = 0; k < readyQueueSize; k++) {
+            int pid = readyQueue[k];
+            if (pid != currentRunning)
+                processList[pid - 1].waitingTime++;
         }
     }
 
-    /* ── 2. Process arrivals ─────────────────────────────────────── */
-    for (int j = 0; j < g_n; j++) {
-        if (g_processList[j].arrivalTime != g_tick) continue;
-        if (g_processes[j].isCreated) continue;
+    // 2. process arrivals
+    for (int j = 0; j < n; j++) {
+        if (processList[j].arrivalTime != tick) continue;
+        if (processes[j].isCreated) continue;
 
-        printf(">> Process %d has ARRIVED\n", g_processes[j].id);
+        printf(">> Process %d has ARRIVED\n", processes[j].id);
 
-        if (loadProgram(&g_processes[j], g_programFiles[j]) < 0) {
-            printf("[OS ERROR] Failed to load %s\n", g_programFiles[j]);
-            strcpy(g_processes[j].pcb.state, "FINISHED");
+        if (loadProgram(&processes[j], programFiles[j]) < 0) {
+            printf("[OS ERROR] Failed to load %s\n", programFiles[j]);
+            strcpy(processes[j].pcb.state, "FINISHED");
             continue;
         }
-        g_processList[j].burstTime = g_processes[j].codeLineCount;
+        processList[j].burstTime = processes[j].codeLineCount;
 
-        int result = allocateProcess(&g_processes[j]);
+        int result = allocateProcess(&processes[j]);
         if (result == -1) {
-            printf("[OS] Not enough memory for P%d — swapping...\n", g_processes[j].id);
-            for (int k = 0; k < g_n; k++) {
-                if (!g_processes[k].isCreated)   continue;
-                if ( g_processes[k].isSwappedOut) continue;
-                if (g_processes[k].id == g_currentRunning) continue;
-                if (strcmp(g_processes[k].pcb.state, "FINISHED") == 0) continue;
+            printf("[OS] Not enough memory for P%d — swapping...\n", processes[j].id);
+            for (int k = 0; k < n; k++) {
+                if (!processes[k].isCreated) continue;
+                if (processes[k].isSwappedOut) continue;
+                if (processes[k].id == currentRunning) continue;
+                if (strcmp(processes[k].pcb.state, "FINISHED") == 0) continue;
                 snprintf(evtBuf, sizeof(evtBuf),
                          "P%d swapped out — making room for P%d",
-                         g_processes[k].id, g_processes[j].id);
-                swapOut(&g_processes[k]);
-                addLog(g_processes[k].id, evtBuf, "memory-swap");
-                result = allocateProcess(&g_processes[j]);
+                         processes[k].id, processes[j].id);
+                swapOut(&processes[k]);
+                addLog(processes[k].id, evtBuf, "memory-swap");
+                result = allocateProcess(&processes[j]);
                 if (result != -1) break;
             }
             if (result == -1) {
-                printf("[OS ERROR] Cannot allocate memory for P%d!\n", g_processes[j].id);
+                printf("[OS ERROR] Cannot allocate memory for P%d!\n", processes[j].id);
                 continue;
             }
         }
 
-        g_processes[j].isCreated = 1;
-        strcpy(g_processes[j].pcb.state, "READY");
+        processes[j].isCreated = 1;
+        strcpy(processes[j].pcb.state, "READY");
         printf("[OS] P%d created → memory [%d–%d] (burst:%d)\n",
-               g_processes[j].id,
-               g_processes[j].pcb.lowerBound,
-               g_processes[j].pcb.upperBound,
-               g_processes[j].codeLineCount);
+               processes[j].id,
+               processes[j].pcb.lowerBound,
+               processes[j].pcb.upperBound,
+               processes[j].codeLineCount);
 
         snprintf(evtBuf, sizeof(evtBuf),
                  "Process %d arrived — allocated memory [%d–%d]",
-                 g_processes[j].id,
-                 g_processes[j].pcb.lowerBound,
-                 g_processes[j].pcb.upperBound);
-        addLog(g_processes[j].id, evtBuf, "memory-swap");
+                 processes[j].id,
+                 processes[j].pcb.lowerBound,
+                 processes[j].pcb.upperBound);
+        addLog(processes[j].id, evtBuf, "memory-swap");
 
-        if (g_algo == 3) {
-            g_q1[g_q1sz++] = g_processes[j].id;
-            g_pLevel[j] = 0;
+        if (algo == 3) {
+            queue1[queue1Size++] = processes[j].id;
+            processQueueLevel[j] = 0;
         } else {
-            g_readyQueue[g_readyQueueSize++] = g_processes[j].id;
+            readyQueue[readyQueueSize++] = processes[j].id;
         }
     }
 
-    /* ── 3. Reset unblock signal ────────────────────────────────── */
+    // 3. reset unblock signal
     unblockedPID = -1;
 
-    /* ════════════════════ SCHEDULING ALGORITHMS ═══════════════════ */
+    // ======== SCHEDULING ALGORITHMS ========
 
-    /* ── HRRN (non-preemptive) ────────────────────────────────────── */
-    if (g_algo == 1) {
+    // ---- HRRN (non-preemptive) ----
+    if (algo == 1) {
+        if (currentRunning == -1 && readyQueueSize > 0) {
+            currentRunning = selectHRRN(readyQueue, readyQueueSize, processList, processes);
+            removeFromQueue(readyQueue, &readyQueueSize, currentRunning);
+            strcpy(processes[currentRunning - 1].pcb.state, "RUNNING");
+            runningPid = currentRunning;
 
-        if (g_currentRunning == -1 && g_readyQueueSize > 0) {
-            g_currentRunning = selectHRRN(g_readyQueue, g_readyQueueSize,
-                                          g_processList, g_processes);
-            removeFromQueue(g_readyQueue, &g_readyQueueSize, g_currentRunning);
-            strcpy(g_processes[g_currentRunning - 1].pcb.state, "RUNNING");
-            g_runningPid = g_currentRunning;
-
-            printf(">> P%d selected (HRRN)\n", g_currentRunning);
+            printf(">> P%d selected (HRRN)\n", currentRunning);
             snprintf(evtBuf, sizeof(evtBuf),
-                     "Process %d scheduled → RUNNING (HRRN)", g_currentRunning);
-            addLog(g_currentRunning, evtBuf, "scheduling");
+                     "Process %d scheduled → RUNNING (HRRN)", currentRunning);
+            addLog(currentRunning, evtBuf, "scheduling");
 
-            printQueues(g_readyQueue, g_readyQueueSize,
-                        g_blockedQueue, g_blockedQueueSize, g_currentRunning);
+            printQueues(readyQueue, readyQueueSize,
+                        blockedQueue, blockedQueueSize, currentRunning);
         }
 
-        if (g_currentRunning != -1) {
-            if (!ensureInMemory(g_currentRunning, g_processes, g_n, g_currentRunning)) {
-                g_readyQueue[g_readyQueueSize++] = g_currentRunning;
-                strcpy(g_processes[g_currentRunning - 1].pcb.state, "READY");
-                g_currentRunning = -1;
+        if (currentRunning != -1) {
+            if (!ensureInMemory(currentRunning, processes, n, currentRunning)) {
+                readyQueue[readyQueueSize++] = currentRunning;
+                strcpy(processes[currentRunning - 1].pcb.state, "READY");
+                currentRunning = -1;
             } else {
-                int idx      = g_currentRunning - 1;
-                int pcBefore = g_processes[idx].pcb.programCounter;
-                int execRes  = executeInstruction(&g_processes[idx]);
+                int idx = currentRunning - 1;
+                int pcBefore = processes[idx].pcb.programCounter;
+                int execRes = executeInstruction(&processes[idx]);
 
-                if (pcBefore < g_processes[idx].codeLineCount) {
+                if (pcBefore < processes[idx].codeLineCount) {
                     snprintf(evtBuf, sizeof(evtBuf), "P%d: %s",
-                             g_currentRunning, g_processes[idx].codeLines[pcBefore]);
-                    addLog(g_currentRunning, evtBuf, "execution");
+                             currentRunning, processes[idx].codeLines[pcBefore]);
+                    addLog(currentRunning, evtBuf, "execution");
                 }
 
                 if (execRes == EXEC_FINISHED) {
-                    strcpy(g_processes[idx].pcb.state, "FINISHED");
-                    g_processList[idx].finishTick = g_tick + 1;
-                    freeProcess(&g_processes[idx]);
-                    printf(">> P%d FINISHED (memory freed)\n", g_currentRunning);
+                    strcpy(processes[idx].pcb.state, "FINISHED");
+                    processList[idx].finishTick = tick + 1;
+                    freeProcess(&processes[idx]);
+                    printf(">> P%d FINISHED (memory freed)\n", currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
-                             "Process %d finished", g_currentRunning);
-                    addLog(g_currentRunning, evtBuf, "finish");
-                    g_runningPid     = -1;
-                    g_currentRunning = -1;
+                             "Process %d finished", currentRunning);
+                    addLog(currentRunning, evtBuf, "finish");
+                    runningPid = -1;
+                    currentRunning = -1;
                 } else if (execRes == EXEC_BLOCKED) {
-                    strcpy(g_processes[idx].pcb.state, "BLOCKED");
-                    g_blockedQueue[g_blockedQueueSize++] = g_currentRunning;
-                    printf(">> P%d BLOCKED\n", g_currentRunning);
+                    strcpy(processes[idx].pcb.state, "BLOCKED");
+                    blockedQueue[blockedQueueSize++] = currentRunning;
+                    printf(">> P%d BLOCKED\n", currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
                              "Process %d BLOCKED on %s",
-                             g_currentRunning, blockedOn(g_currentRunning));
-                    addLog(g_currentRunning, evtBuf, "blocking");
-                    g_runningPid     = -1;
-                    g_currentRunning = -1;
+                             currentRunning, blockedOn(currentRunning));
+                    addLog(currentRunning, evtBuf, "blocking");
+                    runningPid = -1;
+                    currentRunning = -1;
                 }
-                printQueues(g_readyQueue, g_readyQueueSize,
-                            g_blockedQueue, g_blockedQueueSize, g_currentRunning);
+                printQueues(readyQueue, readyQueueSize,
+                            blockedQueue, blockedQueueSize, currentRunning);
             }
         }
     }
 
-    /* ── Round Robin ──────────────────────────────────────────────── */
-    else if (g_algo == 2) {
+    // ---- Round Robin ----
+    else if (algo == 2) {
+        if (readyQueueSize > 0) {
+            currentRunning = readyQueue[0];
+            strcpy(processes[currentRunning - 1].pcb.state, "RUNNING");
+            runningPid = currentRunning;
 
-        if (g_readyQueueSize > 0) {
-            g_currentRunning = g_readyQueue[0];
-            strcpy(g_processes[g_currentRunning - 1].pcb.state, "RUNNING");
-            g_runningPid = g_currentRunning;
-
-            if (!ensureInMemory(g_currentRunning, g_processes, g_n, g_currentRunning)) {
-                /* Rotate to back and try next tick */
-                int tmp = g_readyQueue[0];
-                for (int p = 0; p < g_readyQueueSize - 1; p++)
-                    g_readyQueue[p] = g_readyQueue[p + 1];
-                g_readyQueue[g_readyQueueSize - 1] = tmp;
-                strcpy(g_processes[g_currentRunning - 1].pcb.state, "READY");
-                g_currentRunning = -1;
-                g_niRan = 0;
+            if (!ensureInMemory(currentRunning, processes, n, currentRunning)) {
+                // rotate to back and try next tick
+                int tmp = readyQueue[0];
+                for (int p = 0; p < readyQueueSize - 1; p++)
+                    readyQueue[p] = readyQueue[p + 1];
+                readyQueue[readyQueueSize - 1] = tmp;
+                strcpy(processes[currentRunning - 1].pcb.state, "READY");
+                currentRunning = -1;
+                numberOfInstructionsRan = 0;
             } else {
-                printf(">> Running: P%d\n", g_currentRunning);
-                int idx      = g_currentRunning - 1;
-                int pcBefore = g_processes[idx].pcb.programCounter;
-                int execRes  = executeInstruction(&g_processes[idx]);
-                g_niRan++;
+                printf(">> Running: P%d\n", currentRunning);
+                int idx = currentRunning - 1;
+                int pcBefore = processes[idx].pcb.programCounter;
+                int execRes = executeInstruction(&processes[idx]);
+                numberOfInstructionsRan++;
 
-                if (pcBefore < g_processes[idx].codeLineCount) {
+                if (pcBefore < processes[idx].codeLineCount) {
                     snprintf(evtBuf, sizeof(evtBuf), "P%d: %s",
-                             g_currentRunning, g_processes[idx].codeLines[pcBefore]);
-                    addLog(g_currentRunning, evtBuf, "execution");
+                             currentRunning, processes[idx].codeLines[pcBefore]);
+                    addLog(currentRunning, evtBuf, "execution");
                 }
 
                 if (execRes == EXEC_FINISHED) {
-                    for (int p = 0; p < g_readyQueueSize - 1; p++)
-                        g_readyQueue[p] = g_readyQueue[p + 1];
-                    g_readyQueueSize--;
-                    strcpy(g_processes[idx].pcb.state, "FINISHED");
-                    g_processList[idx].finishTick = g_tick + 1;
-                    freeProcess(&g_processes[idx]);
-                    printf(">> P%d FINISHED\n", g_currentRunning);
+                    for (int p = 0; p < readyQueueSize - 1; p++)
+                        readyQueue[p] = readyQueue[p + 1];
+                    readyQueueSize--;
+                    strcpy(processes[idx].pcb.state, "FINISHED");
+                    processList[idx].finishTick = tick + 1;
+                    freeProcess(&processes[idx]);
+                    printf(">> P%d FINISHED\n", currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
-                             "Process %d finished", g_currentRunning);
-                    addLog(g_currentRunning, evtBuf, "finish");
-                    g_runningPid     = -1;
-                    g_currentRunning = -1;
-                    g_niRan = 0;
+                             "Process %d finished", currentRunning);
+                    addLog(currentRunning, evtBuf, "finish");
+                    runningPid = -1;
+                    currentRunning = -1;
+                    numberOfInstructionsRan = 0;
                 } else if (execRes == EXEC_BLOCKED) {
-                    for (int p = 0; p < g_readyQueueSize - 1; p++)
-                        g_readyQueue[p] = g_readyQueue[p + 1];
-                    g_readyQueueSize--;
-                    g_blockedQueue[g_blockedQueueSize++] = g_currentRunning;
-                    strcpy(g_processes[idx].pcb.state, "BLOCKED");
-                    printf(">> P%d BLOCKED\n", g_currentRunning);
+                    for (int p = 0; p < readyQueueSize - 1; p++)
+                        readyQueue[p] = readyQueue[p + 1];
+                    readyQueueSize--;
+                    blockedQueue[blockedQueueSize++] = currentRunning;
+                    strcpy(processes[idx].pcb.state, "BLOCKED");
+                    printf(">> P%d BLOCKED\n", currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
                              "Process %d BLOCKED on %s",
-                             g_currentRunning, blockedOn(g_currentRunning));
-                    addLog(g_currentRunning, evtBuf, "blocking");
-                    g_runningPid     = -1;
-                    g_currentRunning = -1;
-                    g_niRan = 0;
-                } else if (g_niRan >= g_quantum) {
-                    int tmp = g_readyQueue[0];
-                    for (int p = 0; p < g_readyQueueSize - 1; p++)
-                        g_readyQueue[p] = g_readyQueue[p + 1];
-                    g_readyQueue[g_readyQueueSize - 1] = tmp;
-                    strcpy(g_processes[idx].pcb.state, "READY");
-                    printf(">> P%d quantum expired\n", g_currentRunning);
+                             currentRunning, blockedOn(currentRunning));
+                    addLog(currentRunning, evtBuf, "blocking");
+                    runningPid = -1;
+                    currentRunning = -1;
+                    numberOfInstructionsRan = 0;
+                } else if (numberOfInstructionsRan >= quantum) {
+                    int tmp = readyQueue[0];
+                    for (int p = 0; p < readyQueueSize - 1; p++)
+                        readyQueue[p] = readyQueue[p + 1];
+                    readyQueue[readyQueueSize - 1] = tmp;
+                    strcpy(processes[idx].pcb.state, "READY");
+                    printf(">> P%d quantum expired\n", currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
-                             "P%d preempted — quantum expired (RR)", g_currentRunning);
-                    addLog(g_currentRunning, evtBuf, "scheduling");
-                    /* Keep g_runningPid for the UI — same process may run next tick */
-                    g_currentRunning = -1;
-                    g_niRan = 0;
+                             "P%d preempted — quantum expired (RR)", currentRunning);
+                    addLog(currentRunning, evtBuf, "scheduling");
+                    currentRunning = -1;
+                    numberOfInstructionsRan = 0;
                 }
-                printQueues(g_readyQueue, g_readyQueueSize,
-                            g_blockedQueue, g_blockedQueueSize, g_currentRunning);
+                printQueues(readyQueue, readyQueueSize,
+                            blockedQueue, blockedQueueSize, currentRunning);
             }
         }
     }
 
-    /* ── MLFQ (Multi-Level Feedback Queue) ───────────────────────── */
-    else if (g_algo == 3) {
-
+    // ---- MLFQ (Multi-Level Feedback Queue) ----
+    else if (algo == 3) {
         int selPID = -1, selQ = 0;
-        if      (g_q1sz > 0) { selPID = g_q1[0]; selQ = 1; }
-        else if (g_q2sz > 0) { selPID = g_q2[0]; selQ = 2; }
-        else if (g_q3sz > 0) { selPID = g_q3[0]; selQ = 3; }
-        else if (g_q4sz > 0) { selPID = g_q4[0]; selQ = 4; }
+        if      (queue1Size > 0) { selPID = queue1[0]; selQ = 1; }
+        else if (queue2Size > 0) { selPID = queue2[0]; selQ = 2; }
+        else if (queue3Size > 0) { selPID = queue3[0]; selQ = 3; }
+        else if (queue4Size > 0) { selPID = queue4[0]; selQ = 4; }
 
         if (selPID != -1) {
-            g_currentRunning = selPID;
-            g_runningPid     = selPID;
-            strcpy(g_processes[selPID - 1].pcb.state, "RUNNING");
+            currentRunning = selPID;
+            runningPid = selPID;
+            strcpy(processes[selPID - 1].pcb.state, "RUNNING");
 
-            if (!ensureInMemory(g_currentRunning, g_processes, g_n, g_currentRunning)) {
-                strcpy(g_processes[g_currentRunning - 1].pcb.state, "READY");
-                g_currentRunning = -1;
+            if (!ensureInMemory(currentRunning, processes, n, currentRunning)) {
+                strcpy(processes[currentRunning - 1].pcb.state, "READY");
+                currentRunning = -1;
             } else {
-                printf(">> P%d running (Q%d)\n", g_currentRunning, selQ);
-                int idx      = g_currentRunning - 1;
-                int pcBefore = g_processes[idx].pcb.programCounter;
-                int execRes  = executeInstruction(&g_processes[idx]);
+                printf(">> P%d running (Q%d)\n", currentRunning, selQ);
+                int idx = currentRunning - 1;
+                int pcBefore = processes[idx].pcb.programCounter;
+                int execRes = executeInstruction(&processes[idx]);
 
-                if (pcBefore < g_processes[idx].codeLineCount) {
+                if (pcBefore < processes[idx].codeLineCount) {
                     snprintf(evtBuf, sizeof(evtBuf), "P%d: %s",
-                             g_currentRunning, g_processes[idx].codeLines[pcBefore]);
-                    addLog(g_currentRunning, evtBuf, "execution");
+                             currentRunning, processes[idx].codeLines[pcBefore]);
+                    addLog(currentRunning, evtBuf, "execution");
                 }
 
                 if (execRes == EXEC_FINISHED) {
-                    strcpy(g_processes[idx].pcb.state, "FINISHED");
-                    g_processList[idx].finishTick = g_tick + 1;
-                    freeProcess(&g_processes[idx]);
-                    g_processes[selPID - 1].quantumUsed = 0;
-                    printf(">> P%d FINISHED\n", g_currentRunning);
+                    strcpy(processes[idx].pcb.state, "FINISHED");
+                    processList[idx].finishTick = tick + 1;
+                    freeProcess(&processes[idx]);
+                    processes[selPID - 1].quantumUsed = 0;
+                    printf(">> P%d FINISHED\n", currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
-                             "Process %d finished", g_currentRunning);
-                    addLog(g_currentRunning, evtBuf, "finish");
-                    g_runningPid = -1;
+                             "Process %d finished", currentRunning);
+                    addLog(currentRunning, evtBuf, "finish");
+                    runningPid = -1;
                     switch (selQ) {
-                        case 1: removeFromQueue(g_q1, &g_q1sz, selPID); break;
-                        case 2: removeFromQueue(g_q2, &g_q2sz, selPID); break;
-                        case 3: removeFromQueue(g_q3, &g_q3sz, selPID); break;
-                        case 4: removeFromQueue(g_q4, &g_q4sz, selPID); break;
+                        case 1: removeFromQueue(queue1, &queue1Size, selPID); break;
+                        case 2: removeFromQueue(queue2, &queue2Size, selPID); break;
+                        case 3: removeFromQueue(queue3, &queue3Size, selPID); break;
+                        case 4: removeFromQueue(queue4, &queue4Size, selPID); break;
                     }
                 } else if (execRes == EXEC_BLOCKED) {
-                    strcpy(g_processes[idx].pcb.state, "BLOCKED");
-                    g_blockedQueue[g_blockedQueueSize++] = g_currentRunning;
-                    g_processes[selPID - 1].quantumUsed = 0;
-                    printf(">> P%d BLOCKED\n", g_currentRunning);
+                    strcpy(processes[idx].pcb.state, "BLOCKED");
+                    blockedQueue[blockedQueueSize++] = currentRunning;
+                    processes[selPID - 1].quantumUsed = 0;
+                    printf(">> P%d BLOCKED\n", currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
                              "Process %d BLOCKED on %s",
-                             g_currentRunning, blockedOn(g_currentRunning));
-                    addLog(g_currentRunning, evtBuf, "blocking");
-                    g_runningPid = -1;
+                             currentRunning, blockedOn(currentRunning));
+                    addLog(currentRunning, evtBuf, "blocking");
+                    runningPid = -1;
                     switch (selQ) {
-                        case 1: removeFromQueue(g_q1, &g_q1sz, selPID); break;
-                        case 2: removeFromQueue(g_q2, &g_q2sz, selPID); break;
-                        case 3: removeFromQueue(g_q3, &g_q3sz, selPID); break;
-                        case 4: removeFromQueue(g_q4, &g_q4sz, selPID); break;
+                        case 1: removeFromQueue(queue1, &queue1Size, selPID); break;
+                        case 2: removeFromQueue(queue2, &queue2Size, selPID); break;
+                        case 3: removeFromQueue(queue3, &queue3Size, selPID); break;
+                        case 4: removeFromQueue(queue4, &queue4Size, selPID); break;
                     }
                 } else {
-                    /* EXEC_CONTINUE — check quantum expiry */
-                    g_processes[selPID - 1].quantumUsed++;
+                    // EXEC_CONTINUE — check quantum expiry
+                    processes[selPID - 1].quantumUsed++;
 
                     if (selQ == 1) {
-                        /* Q1 quantum = 1: always demote immediately */
-                        demoteProcess(g_q1, g_q2, &g_q1sz, &g_q2sz, g_pLevel);
-                        g_processes[selPID - 1].quantumUsed = 0;
+                        // Q1 quantum = 1: always demote immediately
+                        demoteProcess(queue1, queue2, &queue1Size, &queue2Size, processQueueLevel);
+                        processes[selPID - 1].quantumUsed = 0;
                         printf(">> P%d demoted Q1→Q2\n", selPID);
                         snprintf(evtBuf, sizeof(evtBuf),
                                  "P%d preempted — demoted Q1→Q2", selPID);
                         addLog(selPID, evtBuf, "scheduling");
-                    } else if (selQ == 2 && g_processes[selPID - 1].quantumUsed >= 2) {
-                        /* Q2 quantum = 2 */
-                        demoteProcess(g_q2, g_q3, &g_q2sz, &g_q3sz, g_pLevel);
-                        g_processes[selPID - 1].quantumUsed = 0;
+                    } else if (selQ == 2 && processes[selPID - 1].quantumUsed >= 2) {
+                        demoteProcess(queue2, queue3, &queue2Size, &queue3Size, processQueueLevel);
+                        processes[selPID - 1].quantumUsed = 0;
                         printf(">> P%d demoted Q2→Q3\n", selPID);
                         snprintf(evtBuf, sizeof(evtBuf),
                                  "P%d preempted — demoted Q2→Q3", selPID);
                         addLog(selPID, evtBuf, "scheduling");
-                    } else if (selQ == 3 && g_processes[selPID - 1].quantumUsed >= 4) {
-                        /* Q3 quantum = 4 */
-                        demoteProcess(g_q3, g_q4, &g_q3sz, &g_q4sz, g_pLevel);
-                        g_processes[selPID - 1].quantumUsed = 0;
+                    } else if (selQ == 3 && processes[selPID - 1].quantumUsed >= 4) {
+                        demoteProcess(queue3, queue4, &queue3Size, &queue4Size, processQueueLevel);
+                        processes[selPID - 1].quantumUsed = 0;
                         printf(">> P%d demoted Q3→Q4\n", selPID);
                         snprintf(evtBuf, sizeof(evtBuf),
                                  "P%d preempted — demoted Q3→Q4", selPID);
                         addLog(selPID, evtBuf, "scheduling");
-                    } else if (selQ == 4 && g_processes[selPID - 1].quantumUsed >= 8) {
-                        /* Q4 quantum = 8: RR rotation */
-                        rotateQueue4(g_q4, &g_q4sz);
-                        g_processes[selPID - 1].quantumUsed = 0;
+                    } else if (selQ == 4 && processes[selPID - 1].quantumUsed >= 8) {
+                        rotateQueue4(queue4, &queue4Size);
+                        processes[selPID - 1].quantumUsed = 0;
                         printf(">> P%d rotated in Q4\n", selPID);
                         snprintf(evtBuf, sizeof(evtBuf),
                                  "P%d rotated in Q4 (RR)", selPID);
                         addLog(selPID, evtBuf, "scheduling");
                     }
-                    /* Keep g_runningPid = selPID so the UI shows last runner */
                 }
 
-                printMLFQQueues(g_q1, g_q1sz, g_q2, g_q2sz,
-                                g_q3, g_q3sz, g_q4, g_q4sz,
-                                g_blockedQueue, g_blockedQueueSize, g_currentRunning);
-                g_currentRunning = -1;  /* MLFQ re-selects each tick */
+                printMLFQQueues(queue1, queue1Size, queue2, queue2Size,
+                                queue3, queue3Size, queue4, queue4Size,
+                                blockedQueue, blockedQueueSize, currentRunning);
+                currentRunning = -1; // MLFQ re-selects each tick
             }
         }
     }
 
-    /* ── 4. Handle processes unblocked by semSignal ─────────────── */
+    // 4. handle processes unblocked by semSignal
     if (unblockedPID != -1) {
-        for (int i = 0; i < g_blockedQueueSize; i++) {
-            if (g_blockedQueue[i] != unblockedPID) continue;
-            for (int j = i; j < g_blockedQueueSize - 1; j++)
-                g_blockedQueue[j] = g_blockedQueue[j + 1];
-            g_blockedQueueSize--;
+        for (int i = 0; i < blockedQueueSize; i++) {
+            if (blockedQueue[i] != unblockedPID) continue;
+            for (int j = i; j < blockedQueueSize - 1; j++)
+                blockedQueue[j] = blockedQueue[j + 1];
+            blockedQueueSize--;
             break;
         }
-        strcpy(g_processes[unblockedPID - 1].pcb.state, "READY");
+        strcpy(processes[unblockedPID - 1].pcb.state, "READY");
         printf(">> P%d UNBLOCKED → ready\n", unblockedPID);
         snprintf(evtBuf, sizeof(evtBuf),
                  "Process %d unblocked → ready queue", unblockedPID);
         addLog(unblockedPID, evtBuf, "blocking");
 
-        if (g_algo == 3) {
-            int lvl = g_pLevel[unblockedPID - 1];
+        if (algo == 3) {
+            int lvl = processQueueLevel[unblockedPID - 1];
             switch (lvl) {
-                case 0: g_q1[g_q1sz++] = unblockedPID; break;
-                case 1: g_q2[g_q2sz++] = unblockedPID; break;
-                case 2: g_q3[g_q3sz++] = unblockedPID; break;
-                case 3: g_q4[g_q4sz++] = unblockedPID; break;
+                case 0: queue1[queue1Size++] = unblockedPID; break;
+                case 1: queue2[queue2Size++] = unblockedPID; break;
+                case 2: queue3[queue3Size++] = unblockedPID; break;
+                case 3: queue4[queue4Size++] = unblockedPID; break;
             }
-            printMLFQQueues(g_q1, g_q1sz, g_q2, g_q2sz,
-                            g_q3, g_q3sz, g_q4, g_q4sz,
-                            g_blockedQueue, g_blockedQueueSize, -1);
+            printMLFQQueues(queue1, queue1Size, queue2, queue2Size,
+                            queue3, queue3Size, queue4, queue4Size,
+                            blockedQueue, blockedQueueSize, -1);
         } else {
-            g_readyQueue[g_readyQueueSize++] = unblockedPID;
-            printQueues(g_readyQueue, g_readyQueueSize,
-                        g_blockedQueue, g_blockedQueueSize, -1);
+            readyQueue[readyQueueSize++] = unblockedPID;
+            printQueues(readyQueue, readyQueueSize,
+                        blockedQueue, blockedQueueSize, -1);
         }
     }
 
-    /* ── 5. Sync PCBs and print memory ──────────────────────────── */
-    for (int i = 0; i < g_n; i++) {
-        if (g_processes[i].isCreated && !g_processes[i].isSwappedOut &&
-                strcmp(g_processes[i].pcb.state, "FINISHED") != 0)
-            syncPCBToMemory(&g_processes[i]);
+    // 5. sync PCBs to memory and print memory state
+    for (int i = 0; i < n; i++) {
+        if (processes[i].isCreated && !processes[i].isSwappedOut &&
+                strcmp(processes[i].pcb.state, "FINISHED") != 0)
+            syncPCBToMemory(&processes[i]);
     }
     printMemory();
 
-    g_tick++;
+    tick++;
 
-    if (isFinished(g_processes, g_n)) {
-        g_simFinished = 1;
+    if (isFinished(processes, n)) {
+        simFinished = 1;
         addLog(-1, "All processes finished", "finish");
         printf("\n╔═══════════════════════════════════╗\n");
         printf("║     ALL PROCESSES FINISHED        ║\n");
         printf("╚═══════════════════════════════════╝\n");
-        printf("Total clock cycles: %d\n", g_tick);
+        printf("Total clock cycles: %d\n", tick);
         printDisk();
     }
 }
 
-/* ═══════════════════════ HTTP SERVER ══════════════════════════════ */
+// -------- HTTP server --------
 
 static void writeAll(int fd, const char *buf, int len) {
     int sent = 0;
     while (sent < len) {
-        int n = (int)write(fd, buf + sent, len - sent);
-        if (n <= 0) return;
-        sent += n;
+        int w = (int)write(fd, buf + sent, len - sent);
+        if (w <= 0) return;
+        sent += w;
     }
 }
 
-static void sendResponse(int fd, int status,
-                         const char *body, int bodyLen) {
+static void sendResponse(int fd, int status, const char *body, int bodyLen) {
     const char *statusStr =
         (status == 200) ? "200 OK" :
         (status == 404) ? "404 Not Found" : "500 Internal Server Error";
 
     char header[512];
-    int  hlen = snprintf(header, sizeof(header),
+    int hlen = snprintf(header, sizeof(header),
         "HTTP/1.1 %s\r\n"
         "Content-Type: application/json\r\n"
         "Access-Control-Allow-Origin: *\r\n"
@@ -926,14 +912,13 @@ static void sendResponse(int fd, int status,
     if (bodyLen > 0) writeAll(fd, body, bodyLen);
 }
 
-/* Extract a simple quoted string value after `key` in `json`.
-   Writes at most cap-1 characters into out.  Returns 1 on success. */
+// extract a simple quoted string value after key in json
 static int jsonGet(const char *json, const char *key, char *out, int cap) {
     const char *p = strstr(json, key);
     if (!p) return 0;
     p = strchr(p + strlen(key), '"');
     if (!p) return 0;
-    p++;                               /* skip opening quote */
+    p++;
     int i = 0;
     while (*p && *p != '"' && i < cap - 1)
         out[i++] = *p++;
@@ -941,7 +926,7 @@ static int jsonGet(const char *json, const char *key, char *out, int cap) {
     return 1;
 }
 
-/* Extract a numeric value after `key` in `json`.  Returns 0 on fail. */
+// extract a numeric value after key in json
 static int jsonGetInt(const char *json, const char *key, int *out) {
     const char *p = strstr(json, key);
     if (!p) return 0;
@@ -953,14 +938,13 @@ static int jsonGetInt(const char *json, const char *key, int *out) {
     return 1;
 }
 
-/* Extract an integer array after `key` in `json` (e.g. "arrivals": [0,1,4]).
-   Writes at most `cap` elements into `out`.  Returns count parsed, 0 on fail. */
+// extract an integer array after key in json (e.g. "arrivals": [0,1,4])
 static int jsonGetIntArray(const char *json, const char *key, int *out, int cap) {
     const char *p = strstr(json, key);
     if (!p) return 0;
     p = strchr(p + strlen(key), '[');
     if (!p) return 0;
-    p++;  /* skip '[' */
+    p++;
     int count = 0;
     while (*p && *p != ']' && count < cap) {
         while (*p == ' ' || *p == ',') p++;
@@ -977,32 +961,32 @@ static int jsonGetIntArray(const char *json, const char *key, int *out, int cap)
 }
 
 static void handleRequest(int fd) {
-    /* ── Read request ────────────────────────────────────────────── */
+    // read request
     char req[HTTP_RX_BUF];
-    int  total = 0;
+    int total = 0;
 
     while (total < HTTP_RX_BUF - 1) {
-        int n = (int)read(fd, req + total, HTTP_RX_BUF - total - 1);
-        if (n <= 0) break;
-        total += n;
+        int nr = (int)read(fd, req + total, HTTP_RX_BUF - total - 1);
+        if (nr <= 0) break;
+        total += nr;
         req[total] = '\0';
         if (strstr(req, "\r\n\r\n")) break;
     }
     if (total == 0) return;
     req[total] = '\0';
 
-    /* ── Parse method + path ──────────────────────────────────────── */
-    char method[8]  = {0};
-    char path[256]  = {0};
+    // parse method + path
+    char method[8] = {0};
+    char path[256] = {0};
     sscanf(req, "%7s %255s", method, path);
 
-    /* ── CORS preflight ───────────────────────────────────────────── */
+    // CORS preflight
     if (strcmp(method, "OPTIONS") == 0) {
         sendResponse(fd, 200, "", 0);
         return;
     }
 
-    /* ── Locate request body ──────────────────────────────────────── */
+    // locate request body
     char body[1024] = {0};
     char *bodyStart = strstr(req, "\r\n\r\n");
     if (bodyStart) {
@@ -1016,41 +1000,40 @@ static void handleRequest(int fd) {
 
     printf("[HTTP] %s %s\n", method, path);
 
-    /* ── Route ────────────────────────────────────────────────────── */
+    // route
     if (strcmp(path, "/api/state") == 0 && strcmp(method, "GET") == 0) {
         char *json = serializeState();
         sendResponse(fd, 200, json, (int)strlen(json));
     }
     else if (strcmp(path, "/api/step") == 0 && strcmp(method, "POST") == 0) {
-        /* Optional input value for assign … input instructions.
-           Only push if the frontend explicitly supplied one. */
+        // optional input value for assign ... input instructions
         char inputVal[256] = {0};
         if (jsonGet(body, "\"input\"", inputVal, sizeof(inputVal)) && inputVal[0] != '\0')
             sys_pushInput(inputVal);
 
-        if (!g_simFinished)
+        if (!simFinished)
             stepSimulation();
 
         char *json = serializeState();
         sendResponse(fd, 200, json, (int)strlen(json));
     }
     else if (strcmp(path, "/api/reset") == 0 && strcmp(method, "POST") == 0) {
-        /* Optional algorithm selection: {"algo": 1|2|3} */
+        // optional algorithm selection: {"algo": 1|2|3}
         int newAlgo = 0;
         if (jsonGetInt(body, "\"algo\"", &newAlgo) && newAlgo >= 1 && newAlgo <= 3)
-            g_algo = newAlgo;
+            algo = newAlgo;
 
-        /* Optional quantum: {"quantum": N} */
+        // optional quantum: {"quantum": N}
         int newQuantum = 0;
         if (jsonGetInt(body, "\"quantum\"", &newQuantum) && newQuantum >= 1 && newQuantum <= 16)
-            g_quantum = newQuantum;
+            quantum = newQuantum;
 
-        /* Optional arrival times: {"arrivals": [0, 1, 4]} */
+        // optional arrival times: {"arrivals": [0, 1, 4]}
         int tmpArrivals[MAX_PROCESSES];
-        int nArr = jsonGetIntArray(body, "\"arrivals\"", tmpArrivals, g_n);
-        if (nArr == g_n) {
-            for (int i = 0; i < g_n; i++)
-                g_arrivalTimes[i] = tmpArrivals[i];
+        int nArr = jsonGetIntArray(body, "\"arrivals\"", tmpArrivals, n);
+        if (nArr == n) {
+            for (int i = 0; i < n; i++)
+                arrivalTimes[i] = tmpArrivals[i];
         }
 
         resetSimulation();
@@ -1065,7 +1048,6 @@ static void handleRequest(int fd) {
 }
 
 static void runServer(int port) {
-    /* Ignore SIGPIPE so a closed client socket doesn't kill the server */
     signal(SIGPIPE, SIG_IGN);
 
     int srv = socket(AF_INET, SOCK_STREAM, 0);
@@ -1079,9 +1061,9 @@ static void runServer(int port) {
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
-    addr.sin_family      = AF_INET;
+    addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port        = htons((uint16_t)port);
+    addr.sin_port = htons((uint16_t)port);
 
     if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("bind"); exit(1);
@@ -1090,8 +1072,8 @@ static void runServer(int port) {
         perror("listen"); exit(1);
     }
 
-    const char *algoStr = (g_algo == 1) ? "HRRN" :
-                          (g_algo == 2) ? "RR"   : "MLFQ";
+    const char *algoStr = (algo == 1) ? "HRRN" :
+                          (algo == 2) ? "RR"   : "MLFQ";
     printf("[HTTP] SimOS server listening on http://localhost:%d\n", port);
     printf("[HTTP] Algorithm: %s   (POST /api/reset {\"algo\":1|2|3} to change)\n", algoStr);
     printf("[HTTP] GET  /api/state  → full simulation state as JSON\n");
@@ -1106,7 +1088,7 @@ static void runServer(int port) {
             break;
         }
 
-        /* 5-second receive timeout so a stalled client can't block forever */
+        // 5-second receive timeout
         struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -1117,57 +1099,51 @@ static void runServer(int port) {
     close(srv);
 }
 
-/* ════════════════════════════════════════════════════════════════ */
-/*                              MAIN                               */
-/* ════════════════════════════════════════════════════════════════ */
-
-/* ═══════════════════════ STANDALONE MODE ══════════════════════════ */
+// -------- standalone mode --------
 
 static void runStandalone(void) {
-    const char *algoStr = (g_algo == 1) ? "HRRN" :
-                          (g_algo == 2) ? "RR"   : "MLFQ";
+    const char *algoStr = (algo == 1) ? "HRRN" :
+                          (algo == 2) ? "RR"   : "MLFQ";
     printf("╔══════════════════════════════════════════╗\n");
     printf("║          SimOS — Standalone Mode          ║\n");
     printf("║  Algorithm: %-5s   Quantum: %-2d           ║\n",
-           algoStr, g_quantum);
+           algoStr, quantum);
     printf("╚══════════════════════════════════════════╝\n\n");
 
-    while (!g_simFinished) {
+    while (!simFinished) {
         stepSimulation();
     }
 
-    /* ── Final statistics ────────────────────────────────────────── */
+    // final statistics
     printf("\n╔══════════════════════════════════════════╗\n");
     printf("║              FINAL STATISTICS             ║\n");
     printf("╚══════════════════════════════════════════╝\n");
     printf("%-6s %-10s %-12s %-12s\n",
            "PID", "BurstTime", "WaitingTime", "TurnaroundTime");
     printf("──────────────────────────────────────────\n");
-    for (int i = 0; i < g_n; i++) {
-        int bt = g_processList[i].burstTime;
-        int wt = g_processList[i].waitingTime;
-        int ta = g_processList[i].finishTick - g_processList[i].arrivalTime;
+    for (int i = 0; i < n; i++) {
+        int bt = processList[i].burstTime;
+        int wt = processList[i].waitingTime;
+        int ta = processList[i].finishTick - processList[i].arrivalTime;
         printf("P%-5d %-10d %-12d %-12d\n",
-               g_processes[i].id, bt, wt, ta);
+               processes[i].id, bt, wt, ta);
     }
     printf("──────────────────────────────────────────\n");
-    printf("Total clock cycles: %d\n\n", g_tick);
+    printf("Total clock cycles: %d\n\n", tick);
 }
 
-/* ════════════════════════════════════════════════════════════════ */
-/*                              MAIN                               */
-/* ════════════════════════════════════════════════════════════════ */
+// -------- main --------
 
 int main(int argc, char *argv[]) {
     int standalone = 0;
 
-    /* Parse args: --standalone [algo] or just [algo] */
+    // parse args: --standalone [algo] or just [algo]
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--standalone") == 0) {
             standalone = 1;
         } else {
             int a = atoi(argv[i]);
-            if (a >= 1 && a <= 3) g_algo = a;
+            if (a >= 1 && a <= 3) algo = a;
         }
     }
 
@@ -1181,27 +1157,27 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-/* ════════════════════════════════════════════════════════════════ */
-/*                        HELPER FUNCTIONS                         */
-/* ════════════════════════════════════════════════════════════════ */
+// -------- helper functions --------
 
-bool isFinished(Process procs[], int n) {
-    for (int i = 0; i < n; i++)
+bool isFinished(Process procs[], int count) {
+    for (int i = 0; i < count; i++)
         if (strcmp(procs[i].pcb.state, "FINISHED") != 0) return false;
     return true;
+    // this function just checks if all the processes are finished
 }
 
-int selectHRRN(int rq[], int rqsz,
-               SchedulerInfo pl[], Process procs[]) {
+int selectHRRN(int rq[], int rqsz, SchedulerInfo pl[], Process procs[]) {
     float best = -1;
-    int   sel  = rq[0];
+    int sel = rq[0];
     for (int i = 0; i < rqsz; i++) {
-        int   pid = rq[i];
-        int   wt  = pl[pid - 1].waitingTime;
-        int   bt  = procs[pid - 1].codeLineCount;  /* total burst (e_i) */
+        int pid = rq[i];
+        int wt = pl[pid - 1].waitingTime;
+        int bt = procs[pid - 1].codeLineCount; // total burst
         if (bt <= 0) bt = 1;
-        float rr  = (float)(wt + bt) / bt;         /* (W_i + e_i) / e_i */
+        float rr = (float)(wt + bt) / bt;      // (W + BT) / BT
         if (rr > best) { best = rr; sel = pid; }
+        // we collected the waiting and bursttime now we do (waitingTime + burstTime) / burstTime
+        // for each process until we find the highest ratio and return it
     }
     printf("  HRRN: P%d selected (ratio: %.2f)\n", sel, best);
     return sel;
@@ -1216,27 +1192,28 @@ void removeFromQueue(int q[], int *sz, int pid) {
     }
 }
 
-void demoteProcess(int cq[], int nq[],
-                   int *csz, int *nsz,
+void demoteProcess(int currentQueue[], int nextQueue[],
+                   int *currentQueueSize, int *nextQueueSize,
                    int pql[]) {
-    if (*csz <= 0) return;
-    int pid = cq[0];
-    for (int i = 0; i < *csz - 1; i++) cq[i] = cq[i + 1];
-    (*csz)--;
-    nq[*nsz] = pid;
-    (*nsz)++;
-    if (pql[pid - 1] < 3) pql[pid - 1]++;
+    if (*currentQueueSize <= 0) return;
+    int pid = currentQueue[0];
+    for (int i = 0; i < *currentQueueSize - 1; i++)
+        currentQueue[i] = currentQueue[i + 1];
+    // shift current queue to the left, overwrite current index 0
+    (*currentQueueSize)--;
+    nextQueue[*nextQueueSize] = pid; // place the demoted in end of next queue
+    (*nextQueueSize)++;
+    if (pql[pid - 1] < 3) pql[pid - 1]++; // update the process queue level
 }
 
-void rotateQueue4(int q4[], int *sz) {
-    if (*sz <= 1) return;
+void rotateQueue4(int q4[], int *q4sz) {
+    if (*q4sz <= 1) return;
     int first = q4[0];
-    for (int i = 0; i < *sz - 1; i++) q4[i] = q4[i + 1];
-    q4[*sz - 1] = first;
+    for (int i = 0; i < *q4sz - 1; i++) q4[i] = q4[i + 1];
+    q4[*q4sz - 1] = first;
 }
 
-void printQueues(int rq[], int rqsz,
-                 int bq[], int bqsz, int cr) {
+void printQueues(int rq[], int rqsz, int bq[], int bqsz, int cr) {
     printf("--- Queue Status ---\n");
     printf("Ready:   [ ");
     for (int i = 0; i < rqsz; i++) printf("P%d ", rq[i]);
@@ -1264,12 +1241,12 @@ void printMLFQQueues(int q1[], int q1sz, int q2[], int q2sz,
     printf("------------\n");
 }
 
-int ensureInMemory(int pid, Process procs[], int n, int cr) {
-    (void)cr;  /* parameter kept for API compatibility; not needed here */
+int ensureInMemory(int pid, Process procs[], int count, int cr) {
+    (void)cr;
     if (!procs[pid - 1].isSwappedOut) return 1;
 
-    /* Free any finished processes that are still in memory */
-    for (int k = 0; k < n; k++) {
+    // free any finished processes that are still in memory
+    for (int k = 0; k < count; k++) {
         if (procs[k].isCreated && !procs[k].isSwappedOut &&
             strcmp(procs[k].pcb.state, "FINISHED") == 0) {
             printf("[OS] Freeing finished P%d memory\n", procs[k].id);
@@ -1280,10 +1257,10 @@ int ensureInMemory(int pid, Process procs[], int n, int cr) {
 
     if (swapIn(&procs[pid - 1]) != -1) return 1;
 
-    /* Need to evict a live process */
-    for (int k = 0; k < n; k++) {
+    // need to evict a live process
+    for (int k = 0; k < count; k++) {
         if (!procs[k].isCreated || procs[k].isSwappedOut) continue;
-        if (procs[k].id == pid)  continue;
+        if (procs[k].id == pid) continue;
         if (strcmp(procs[k].pcb.state, "FINISHED") == 0) continue;
         swapOut(&procs[k]);
         if (swapIn(&procs[pid - 1]) != -1) return 1;
