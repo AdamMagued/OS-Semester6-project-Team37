@@ -299,6 +299,45 @@ select:focus { border-color: var(--mint); }
   gap:             8px;
 }
 
+/* ── Input prompt modal ───────────────────────────────────────── */
+#input-overlay {
+  position:        fixed;
+  inset:           0;
+  background:      rgba(10, 10, 15, 0.88);
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  z-index:         100;
+}
+#input-overlay.hidden { display: none; }
+
+#input-box {
+  background:      var(--surface);
+  border:          1px solid var(--border);
+  padding:         20px;
+  width:           380px;
+  display:         flex;
+  flex-direction:  column;
+  gap:             12px;
+}
+
+#input-prompt-text {
+  color:           var(--text);
+  font-size:       var(--fs-sm);
+}
+
+#input-value {
+  background:      var(--bg);
+  color:           var(--text);
+  border:          1px solid var(--border);
+  font-family:     var(--font);
+  font-size:       var(--fs-sm);
+  padding:         8px 10px;
+  outline:         none;
+  transition:      border-color 0.15s;
+}
+#input-value:focus { border-color: var(--mint); }
+
 /* ── Utility ──────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

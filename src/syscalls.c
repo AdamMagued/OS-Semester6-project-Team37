@@ -37,6 +37,10 @@ void sys_clearInputQueue(void) {
     s_inputCount = 0;
 }
 
+int sys_inputQueueEmpty(void) {
+    return s_inputCount == 0;
+}
+
 void sys_input(char *buffer, int bufferSize) {
     if (s_inputCount > 0) {
         /* Dequeue the next pre-supplied value */

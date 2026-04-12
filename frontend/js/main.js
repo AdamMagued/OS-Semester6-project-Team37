@@ -33,9 +33,8 @@ document.addEventListener('DOMContentLoaded', function() {
   var modalConfirm  = document.getElementById('modal-confirm');
 
   /* ── Initial render ─────────────────────────────────────────── */
-  /* All modules subscribed themselves during script load;
-     call render explicitly here so the initial state is painted
-     before the user sees the page. */
+  /* Paint mock state immediately so the UI isn't blank,
+     then try to fetch real state from the backend. */
   var s = getState();
   Memory.render(s);
   Scheduler.render(s);
@@ -45,6 +44,11 @@ document.addEventListener('DOMContentLoaded', function() {
   /* Sync controls to initial state values */
   algoSelect.value    = s.algorithm || 'RR';
   quantumInput.value  = s.timeSlice  || 2;
+
+  /* Attempt to load real initial state from the C backend.
+     If reachable, reset to get a clean server-side state.
+     If unreachable, silently keep the mock state. */
+  SimOS.reset().catch(function() { /* backend offline — ignore */ });
 
   /* ── Button handlers ────────────────────────────────────────── */
 
@@ -91,7 +95,7 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch('http://localhost:8080/api/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ algo: algoNum })
+      body: JSON.stringify({ algo: algoNum, quantum: parseInt(quantumInput.value, 10) || 2 })
     })
       .then(function(res) { return res.json(); })
       .then(function(data) {
@@ -157,6 +161,47 @@ document.addEventListener('DOMContentLoaded', function() {
     modalTextarea.style.borderColor = '';
     modalTextarea.title        = '';
   }
+
+  /* ── Input prompt modal ──────────────────────────────────────── */
+  var inputOverlay = document.getElementById('input-overlay');
+  var inputValue   = document.getElementById('input-value');
+  var inputSubmit  = document.getElementById('input-submit');
+  var inputPrompt  = document.getElementById('input-prompt-text');
+
+  function _showInputModal(pid) {
+    inputPrompt.textContent = 'Process P' + pid + ' needs a value';
+    inputValue.value = '';
+    inputOverlay.classList.remove('hidden');
+    inputValue.focus();
+    /* Disable step/run while waiting for input */
+    btnStep.disabled = true;
+    btnRun.disabled  = true;
+  }
+
+  function _hideInputModal() {
+    inputOverlay.classList.add('hidden');
+    inputValue.value = '';
+    /* Re-enable controls */
+    btnStep.disabled = false;
+    btnRun.disabled  = false;
+    btnPause.disabled = true;
+  }
+
+  inputSubmit.addEventListener('click', function() {
+    var val = inputValue.value.trim();
+    if (!val) return;
+    SimOS.submitInput(val);
+  });
+
+  inputValue.addEventListener('keydown', function(e) {
+    if (e.code === 'Enter') {
+      e.preventDefault();
+      inputSubmit.click();
+    }
+  });
+
+  SimOS.onNeedsInput(_showInputModal);
+  SimOS.onInputDone(_hideInputModal);
 
   /* ── Keyboard shortcuts ─────────────────────────────────────── */
   document.addEventListener('keydown', function(e) {

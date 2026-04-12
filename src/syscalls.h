@@ -55,4 +55,9 @@ void sys_pushInput(const char *value);
  */
 void sys_clearInputQueue(void);
 
+/**
+ * Returns 1 if the input queue is empty, 0 otherwise.
+ */
+int sys_inputQueueEmpty(void);
+
 #endif /* SYSCALLS_H */

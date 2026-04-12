@@ -94,6 +94,19 @@
     <div id="log-entries"><!-- populated by log.js --></div>
   </section>
 
+  <!-- ════════════════ INPUT PROMPT MODAL ════════════════ -->
+  <div id="input-overlay" class="hidden">
+    <div id="input-box" class="modal-box">
+      <div class="modal-title">INPUT REQUIRED</div>
+      <div id="input-prompt-text">Process P? needs a value</div>
+      <input type="text" id="input-value" placeholder="Enter a value…"
+             autocomplete="off" spellcheck="false" />
+      <div class="modal-actions">
+        <button id="input-submit" class="ctrl-btn ctrl-btn--primary">SUBMIT</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ════════════════ LOAD JSON MODAL ════════════════ -->
   <div id="modal-overlay" class="hidden">
     <div id="modal-box">

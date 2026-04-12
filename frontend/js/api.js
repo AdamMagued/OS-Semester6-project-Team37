@@ -19,10 +19,17 @@
 var API_BASE = 'http://localhost:8080/api';
 
 /* Active interval handle for RUN mode polling */
-var _pollHandle  = null;
-var _isRunning   = false;
-var _speed       = 1;      /* 1–10  multiplier */
-var _stepPending = false;  /* guard against re-entrance */
+var _pollHandle    = null;
+var _isRunning     = false;
+var _speed         = 1;       /* 1–10  multiplier */
+var _stepPending   = false;   /* guard against re-entrance */
+var _pendingInput  = null;    /* value queued by submitInput(), sent with next step */
+var _needsInput    = false;   /* true when backend says input is required */
+var _needsInputPid = null;    /* PID that needs the input */
+
+/* Callbacks set by main.js to control the input modal */
+var _onNeedsInput  = null;    /* called with (pid) when input is needed */
+var _onInputDone   = null;    /* called when input is no longer needed */
 
 /**
  * Offline fallback step: increment clock, advance PC of running process,
@@ -99,6 +106,13 @@ function fetchState() {
     })
     .then(function(data) {
       setState(data);
+      /* Check if backend needs input */
+      if (data.needsInput && !_needsInput) {
+        _needsInput    = true;
+        _needsInputPid = data.needsInputPid;
+        if (_isRunning) { SimOS.pause(); }
+        if (_onNeedsInput) _onNeedsInput(data.needsInputPid);
+      }
       return data;
     })
     .catch(function(e) {
@@ -133,7 +147,7 @@ function _startPolling() {
   if (_pollHandle) return;
   /* Base interval 1 000 ms ÷ speed — faster speed = shorter interval */
   var interval = Math.round(1000 / _speed);
-  _pollHandle = setInterval(fetchState, interval);
+  _pollHandle = setInterval(function() { SimOS.step(); }, interval);
 }
 
 function _stopPolling() {
@@ -154,12 +168,32 @@ window.SimOS = {
    * so the UI stays responsive during offline development.
    */
   step: function() {
-    if (_stepPending) return Promise.resolve();
+    if (_stepPending || _needsInput) return Promise.resolve();
     _stepPending = true;
-    return _sendCommand('step').then(function(result) {
+
+    /* Attach pending input value if the user just submitted one */
+    var payload = {};
+    if (_pendingInput !== null) {
+      payload.input = _pendingInput;
+      _pendingInput = null;
+    }
+
+    return _sendCommand('step', payload).then(function(result) {
       _stepPending = false;
       if (result) {
         setState(result);
+        /* Check if backend now needs input */
+        if (result.needsInput) {
+          _needsInput    = true;
+          _needsInputPid = result.needsInputPid;
+          /* Auto-pause RUN mode so user can type */
+          if (_isRunning) { SimOS.pause(); }
+          if (_onNeedsInput) _onNeedsInput(result.needsInputPid);
+        } else if (_needsInput) {
+          _needsInput    = false;
+          _needsInputPid = null;
+          if (_onInputDone) _onInputDone();
+        }
       } else {
         /* Offline fallback: rotate ready queue, advance PC, log it */
         _offlineStep();
@@ -183,7 +217,11 @@ window.SimOS = {
   /** Reset simulation to initial state (calls backend then resetState). */
   reset: function() {
     _stopPolling();
-    _isRunning = false;
+    _isRunning     = false;
+    _needsInput    = false;
+    _needsInputPid = null;
+    _pendingInput  = null;
+    if (_onInputDone) _onInputDone();
     return _sendCommand('reset').then(function(result) {
       if (result) {
         setState(result);
@@ -217,5 +255,24 @@ window.SimOS = {
     }
   },
 
-  get isRunning() { return _isRunning; }
+  /**
+   * Submit an input value in response to a needsInput prompt.
+   * The value is sent with the very next step() call.
+   */
+  submitInput: function(value) {
+    _pendingInput  = value;
+    _needsInput    = false;
+    _needsInputPid = null;
+    if (_onInputDone) _onInputDone();
+    /* Immediately step to consume the input */
+    return SimOS.step();
+  },
+
+  /** Register callbacks for the input-needed flow. */
+  onNeedsInput: function(fn) { _onNeedsInput = fn; },
+  onInputDone:  function(fn) { _onInputDone  = fn; },
+
+  get isRunning()   { return _isRunning; },
+  get needsInput()  { return _needsInput; },
+  get needsInputPid() { return _needsInputPid; }
 };

@@ -4,14 +4,15 @@
  * OS scheduler simulation with a built-in HTTP/1.1 server.
  *
  * Usage:
- *   ./bin/scheduler [1|2|3]   1=HRRN  2=RR  3=MLFQ (default)
+ *   ./bin/scheduler [1|2|3]   1=HRRN  2=RR (default)  3=MLFQ
  *
  * HTTP endpoints (all return application/json + CORS headers):
  *   GET  /api/state   → current simulation state
  *   POST /api/step    → advance one clock tick, return new state
  *                       body (optional): {"input":"<value>"}
  *   POST /api/reset   → reset simulation, return initial state
- *                       body (optional): {"algo":<1|2|3>}
+ *                       body (optional): {"algo":<1|2|3>,
+ *                         "quantum":<1-16>, "arrivals":[t0,t1,t2]}
  * ─────────────────────────────────────────────────────────────────
  */
 
@@ -29,7 +30,6 @@
 #include <errno.h>
 
 /* ═══════════════════════════ CONSTANTS ════════════════════════════ */
-#define RR_QUANTUM      2
 #define HTTP_PORT       8080
 #define MAX_LOG         200          /* ring-buffer cap for log entries */
 #define LOG_EVENT_LEN   256
@@ -50,7 +50,8 @@ static LogEntry      g_log[MAX_LOG];
 static int           g_logCount      = 0;
 
 static int           g_tick          = 0;
-static int           g_algo          = 3;   /* 1=HRRN 2=RR 3=MLFQ */
+static int           g_algo          = 2;   /* 1=HRRN 2=RR 3=MLFQ */
+static int           g_quantum       = 2;   /* RR time quantum (runtime-configurable) */
 static int           g_simFinished   = 0;
 static int           g_runningPid    = -1;  /* PID shown in RUNNING card */
 
@@ -105,6 +106,64 @@ static void addLog(int pid, const char *event, const char *type) {
     strncpy(g_log[g_logCount].type, type, LOG_TYPE_LEN - 1);
     g_log[g_logCount].type[LOG_TYPE_LEN - 1] = '\0';
     g_logCount++;
+}
+
+/* ═════════════════════ NEEDS-INPUT CHECK ═════════════════════════ */
+/* Returns the PID of a process whose next instruction is "assign … input"
+   while the input queue is empty.  Returns -1 if no input is needed.
+   Checks the currently running process (or next to run). */
+static int checkNeedsInput(void) {
+    if (!sys_inputQueueEmpty()) return -1;
+
+    /* Determine which PID will execute next */
+    int nextPid = -1;
+    if (g_algo == 3) {
+        if      (g_q1sz > 0) nextPid = g_q1[0];
+        else if (g_q2sz > 0) nextPid = g_q2[0];
+        else if (g_q3sz > 0) nextPid = g_q3[0];
+        else if (g_q4sz > 0) nextPid = g_q4[0];
+    } else if (g_algo == 2) {
+        if (g_readyQueueSize > 0) nextPid = g_readyQueue[0];
+    } else if (g_algo == 1) {
+        nextPid = g_currentRunning;
+        /* If no one is running, check all ready processes — any could be
+           selected by HRRN, so flag if ANY of them need input. */
+        if (nextPid == -1) {
+            for (int k = 0; k < g_readyQueueSize; k++) {
+                int pid = g_readyQueue[k];
+                Process *pp = &g_processes[pid - 1];
+                if (!pp->isCreated || pp->isSwappedOut) continue;
+                int ppc = pp->pcb.programCounter;
+                if (ppc >= pp->codeLineCount) continue;
+                const char *ins = pp->codeLines[ppc];
+                if (strncmp(ins, "assign ", 7) == 0) {
+                    const char *r = ins + 7;
+                    while (*r && *r != ' ' && *r != '\t') r++;
+                    while (*r == ' ' || *r == '\t') r++;
+                    if (strcmp(r, "input") == 0) { nextPid = pid; break; }
+                }
+            }
+            if (nextPid != -1) return nextPid; /* early return — already checked instruction */
+        }
+    }
+    if (nextPid <= 0) return -1;
+
+    Process *p = &g_processes[nextPid - 1];
+    if (!p->isCreated || p->isSwappedOut) return -1;
+    if (strcmp(p->pcb.state, "FINISHED") == 0) return -1;
+
+    int pc = p->pcb.programCounter;
+    if (pc >= p->codeLineCount) return -1;
+
+    /* Check if the instruction is "assign <var> input" */
+    const char *instr = p->codeLines[pc];
+    if (strncmp(instr, "assign ", 7) != 0) return -1;
+    /* Find the second token after "assign <var> " */
+    const char *q = instr + 7;
+    while (*q && *q != ' ' && *q != '\t') q++;  /* skip var name */
+    while (*q == ' ' || *q == '\t') q++;          /* skip whitespace */
+    if (strcmp(q, "input") == 0) return nextPid;
+    return -1;
 }
 
 /* ═════════════════════════ JSON HELPERS ═══════════════════════════ */
@@ -165,7 +224,7 @@ char *serializeState(void) {
 
     const char *algoStr = (g_algo == 1) ? "HRRN" :
                           (g_algo == 2) ? "RR"   : "MLFQ";
-    int tsSlice = (g_algo == 2) ? RR_QUANTUM : 2;
+    int tsSlice = g_quantum;
 
     AP("{");
     AP("\"clock\":%d,", g_tick);
@@ -176,6 +235,15 @@ char *serializeState(void) {
         AP("\"runningPid\":%d,", g_runningPid);
     else
         AP("\"runningPid\":null,");
+
+    /* ── needsInput — tells frontend to prompt user ────────────── */
+    {
+        int nip = checkNeedsInput();
+        if (nip != -1)
+            AP("\"needsInput\":true,\"needsInputPid\":%d,", nip);
+        else
+            AP("\"needsInput\":false,\"needsInputPid\":null,");
+    }
 
     /* ── readyQueue ─────────────────────────────────────────────── */
     AP("\"readyQueue\":[");
@@ -241,10 +309,10 @@ char *serializeState(void) {
 
             AP("\"waitingTime\":%d,", g_processList[i].waitingTime);
 
-            /* responseRatio — HRRN only */
+            /* responseRatio — HRRN only: (W_i + e_i) / e_i with e_i = total burst */
             if (g_algo == 1) {
                 int wt = g_processList[i].waitingTime;
-                int bt = p->codeLineCount - p->pcb.programCounter;
+                int bt = p->codeLineCount;  /* total burst (e_i) */
                 if (bt <= 0) bt = 1;
                 float rr = (float)(wt + bt) / bt;
                 AP("\"responseRatio\":%.2f,", rr);
@@ -438,10 +506,22 @@ static void stepSimulation(void) {
     printf("╚═══════════════════════════════════╝\n");
 
     /* ── 1. Update waiting times (before arrivals, so they don't count) ── */
-    for (int k = 0; k < g_readyQueueSize; k++) {
-        int pid = g_readyQueue[k];
-        if (pid != g_currentRunning)
-            g_processList[pid - 1].waitingTime++;
+    if (g_algo == 3) {
+        /* MLFQ: ready processes live in g_q1–g_q4 */
+        int *qs[4] = { g_q1,   g_q2,   g_q3,   g_q4   };
+        int  sz[4] = { g_q1sz, g_q2sz, g_q3sz, g_q4sz };
+        for (int qi = 0; qi < 4; qi++)
+            for (int k = 0; k < sz[qi]; k++) {
+                int pid = qs[qi][k];
+                if (pid != g_currentRunning)
+                    g_processList[pid - 1].waitingTime++;
+            }
+    } else {
+        for (int k = 0; k < g_readyQueueSize; k++) {
+            int pid = g_readyQueue[k];
+            if (pid != g_currentRunning)
+                g_processList[pid - 1].waitingTime++;
+        }
     }
 
     /* ── 2. Process arrivals ─────────────────────────────────────── */
@@ -626,7 +706,7 @@ static void stepSimulation(void) {
                     g_runningPid     = -1;
                     g_currentRunning = -1;
                     g_niRan = 0;
-                } else if (g_niRan >= RR_QUANTUM) {
+                } else if (g_niRan >= g_quantum) {
                     int tmp = g_readyQueue[0];
                     for (int p = 0; p < g_readyQueueSize - 1; p++)
                         g_readyQueue[p] = g_readyQueue[p + 1];
@@ -867,6 +947,29 @@ static int jsonGetInt(const char *json, const char *key, int *out) {
     return 1;
 }
 
+/* Extract an integer array after `key` in `json` (e.g. "arrivals": [0,1,4]).
+   Writes at most `cap` elements into `out`.  Returns count parsed, 0 on fail. */
+static int jsonGetIntArray(const char *json, const char *key, int *out, int cap) {
+    const char *p = strstr(json, key);
+    if (!p) return 0;
+    p = strchr(p + strlen(key), '[');
+    if (!p) return 0;
+    p++;  /* skip '[' */
+    int count = 0;
+    while (*p && *p != ']' && count < cap) {
+        while (*p == ' ' || *p == ',') p++;
+        if (*p == ']' || *p == '\0') break;
+        if ((*p >= '0' && *p <= '9') || *p == '-') {
+            out[count++] = atoi(p);
+            if (*p == '-') p++;
+            while (*p >= '0' && *p <= '9') p++;
+        } else {
+            break;
+        }
+    }
+    return count;
+}
+
 static void handleRequest(int fd) {
     /* ── Read request ────────────────────────────────────────────── */
     char req[HTTP_RX_BUF];
@@ -913,10 +1016,11 @@ static void handleRequest(int fd) {
         sendResponse(fd, 200, json, (int)strlen(json));
     }
     else if (strcmp(path, "/api/step") == 0 && strcmp(method, "POST") == 0) {
-        /* Optional input value for assign … input instructions */
-        char inputVal[256] = "0";
-        jsonGet(body, "\"input\"", inputVal, sizeof(inputVal));
-        sys_pushInput(inputVal);
+        /* Optional input value for assign … input instructions.
+           Only push if the frontend explicitly supplied one. */
+        char inputVal[256] = {0};
+        if (jsonGet(body, "\"input\"", inputVal, sizeof(inputVal)) && inputVal[0] != '\0')
+            sys_pushInput(inputVal);
 
         if (!g_simFinished)
             stepSimulation();
@@ -929,6 +1033,19 @@ static void handleRequest(int fd) {
         int newAlgo = 0;
         if (jsonGetInt(body, "\"algo\"", &newAlgo) && newAlgo >= 1 && newAlgo <= 3)
             g_algo = newAlgo;
+
+        /* Optional quantum: {"quantum": N} */
+        int newQuantum = 0;
+        if (jsonGetInt(body, "\"quantum\"", &newQuantum) && newQuantum >= 1 && newQuantum <= 16)
+            g_quantum = newQuantum;
+
+        /* Optional arrival times: {"arrivals": [0, 1, 4]} */
+        int tmpArrivals[MAX_PROCESSES];
+        int nArr = jsonGetIntArray(body, "\"arrivals\"", tmpArrivals, g_n);
+        if (nArr == g_n) {
+            for (int i = 0; i < g_n; i++)
+                g_arrivalTimes[i] = tmpArrivals[i];
+        }
 
         resetSimulation();
 
@@ -1027,10 +1144,9 @@ int selectHRRN(int rq[], int rqsz,
     for (int i = 0; i < rqsz; i++) {
         int   pid = rq[i];
         int   wt  = pl[pid - 1].waitingTime;
-        int   bt  = procs[pid - 1].codeLineCount
-                  - procs[pid - 1].pcb.programCounter;
+        int   bt  = procs[pid - 1].codeLineCount;  /* total burst (e_i) */
         if (bt <= 0) bt = 1;
-        float rr  = (float)(wt + bt) / bt;
+        float rr  = (float)(wt + bt) / bt;         /* (W_i + e_i) / e_i */
         if (rr > best) { best = rr; sel = pid; }
     }
     printf("  HRRN: P%d selected (ratio: %.2f)\n", sel, best);
