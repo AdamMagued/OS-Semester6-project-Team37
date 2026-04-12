@@ -228,6 +228,7 @@ window.SimOS = {
       } else {
         resetState();
       }
+      return result;
     });
   },
 

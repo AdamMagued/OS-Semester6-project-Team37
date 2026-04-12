@@ -4,7 +4,8 @@
  * OS scheduler simulation with a built-in HTTP/1.1 server.
  *
  * Usage:
- *   ./bin/scheduler [1|2|3]   1=HRRN  2=RR (default)  3=MLFQ
+ *   ./bin/scheduler [1|2|3]              server mode on :8080
+ *   ./bin/scheduler --standalone [1|2|3] run full simulation, print to stdout
  *
  * HTTP endpoints (all return application/json + CORS headers):
  *   GET  /api/state   → current simulation state
@@ -486,6 +487,7 @@ static void initSimulation(void) {
         g_processList[i].arrivalTime   = g_arrivalTimes[i];
         g_processList[i].burstTime     = 0;
         g_processList[i].waitingTime   = 0;
+        g_processList[i].finishTick    = 0;
     }
 }
 
@@ -625,6 +627,7 @@ static void stepSimulation(void) {
 
                 if (execRes == EXEC_FINISHED) {
                     strcpy(g_processes[idx].pcb.state, "FINISHED");
+                    g_processList[idx].finishTick = g_tick + 1;
                     freeProcess(&g_processes[idx]);
                     printf(">> P%d FINISHED (memory freed)\n", g_currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
@@ -684,6 +687,7 @@ static void stepSimulation(void) {
                         g_readyQueue[p] = g_readyQueue[p + 1];
                     g_readyQueueSize--;
                     strcpy(g_processes[idx].pcb.state, "FINISHED");
+                    g_processList[idx].finishTick = g_tick + 1;
                     freeProcess(&g_processes[idx]);
                     printf(">> P%d FINISHED\n", g_currentRunning);
                     snprintf(evtBuf, sizeof(evtBuf),
@@ -757,6 +761,7 @@ static void stepSimulation(void) {
 
                 if (execRes == EXEC_FINISHED) {
                     strcpy(g_processes[idx].pcb.state, "FINISHED");
+                    g_processList[idx].finishTick = g_tick + 1;
                     freeProcess(&g_processes[idx]);
                     g_processes[selPID - 1].quantumUsed = 0;
                     printf(">> P%d FINISHED\n", g_currentRunning);
@@ -869,7 +874,8 @@ static void stepSimulation(void) {
 
     /* ── 5. Sync PCBs and print memory ──────────────────────────── */
     for (int i = 0; i < g_n; i++) {
-        if (g_processes[i].isCreated && !g_processes[i].isSwappedOut)
+        if (g_processes[i].isCreated && !g_processes[i].isSwappedOut &&
+                strcmp(g_processes[i].pcb.state, "FINISHED") != 0)
             syncPCBToMemory(&g_processes[i]);
     }
     printMemory();
@@ -1115,15 +1121,63 @@ static void runServer(int port) {
 /*                              MAIN                               */
 /* ════════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════ STANDALONE MODE ══════════════════════════ */
+
+static void runStandalone(void) {
+    const char *algoStr = (g_algo == 1) ? "HRRN" :
+                          (g_algo == 2) ? "RR"   : "MLFQ";
+    printf("╔══════════════════════════════════════════╗\n");
+    printf("║          SimOS — Standalone Mode          ║\n");
+    printf("║  Algorithm: %-5s   Quantum: %-2d           ║\n",
+           algoStr, g_quantum);
+    printf("╚══════════════════════════════════════════╝\n\n");
+
+    while (!g_simFinished) {
+        stepSimulation();
+    }
+
+    /* ── Final statistics ────────────────────────────────────────── */
+    printf("\n╔══════════════════════════════════════════╗\n");
+    printf("║              FINAL STATISTICS             ║\n");
+    printf("╚══════════════════════════════════════════╝\n");
+    printf("%-6s %-10s %-12s %-12s\n",
+           "PID", "BurstTime", "WaitingTime", "TurnaroundTime");
+    printf("──────────────────────────────────────────\n");
+    for (int i = 0; i < g_n; i++) {
+        int bt = g_processList[i].burstTime;
+        int wt = g_processList[i].waitingTime;
+        int ta = g_processList[i].finishTick - g_processList[i].arrivalTime;
+        printf("P%-5d %-10d %-12d %-12d\n",
+               g_processes[i].id, bt, wt, ta);
+    }
+    printf("──────────────────────────────────────────\n");
+    printf("Total clock cycles: %d\n\n", g_tick);
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/*                              MAIN                               */
+/* ════════════════════════════════════════════════════════════════ */
+
 int main(int argc, char *argv[]) {
-    /* Optional positional arg: algorithm (1 HRRN | 2 RR | 3 MLFQ) */
-    if (argc >= 2) {
-        int a = atoi(argv[1]);
-        if (a >= 1 && a <= 3) g_algo = a;
+    int standalone = 0;
+
+    /* Parse args: --standalone [algo] or just [algo] */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--standalone") == 0) {
+            standalone = 1;
+        } else {
+            int a = atoi(argv[i]);
+            if (a >= 1 && a <= 3) g_algo = a;
+        }
     }
 
     initSimulation();
-    runServer(HTTP_PORT);
+
+    if (standalone) {
+        runStandalone();
+    } else {
+        runServer(HTTP_PORT);
+    }
     return 0;
 }
 

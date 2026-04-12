@@ -104,6 +104,26 @@ body {
   flex-shrink:    0;
 }
 
+/* ── Offline banner ───────────────────────────────────────────── */
+#offline-banner {
+  background:  rgba(255, 80, 80, 0.12);
+  border-bottom: 1px solid rgba(255, 80, 80, 0.35);
+  padding:     10px 16px;
+  font-size:   var(--fs-sm);
+  color:       #ff8080;
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+}
+#offline-banner code {
+  background:    rgba(255,255,255,0.07);
+  border:        1px solid rgba(255,255,255,0.12);
+  padding:       1px 6px;
+  font-family:   var(--font);
+  font-size:     inherit;
+  color:         var(--text);
+}
+
 /* ── Page structure ───────────────────────────────────────────── */
 #controls-bar {
   flex:            0 0 auto;

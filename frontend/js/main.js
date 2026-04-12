@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var btnRun       = document.getElementById('btn-run');
   var btnPause     = document.getElementById('btn-pause');
   var btnReset     = document.getElementById('btn-reset');
+  var offlineBanner = document.getElementById('offline-banner');
   var speedSlider  = document.getElementById('speed-slider');
   var speedValue   = document.getElementById('speed-value');
   var algoSelect   = document.getElementById('algo-select');
@@ -45,10 +46,28 @@ document.addEventListener('DOMContentLoaded', function() {
   algoSelect.value    = s.algorithm || 'RR';
   quantumInput.value  = s.timeSlice  || 2;
 
-  /* Attempt to load real initial state from the C backend.
-     If reachable, reset to get a clean server-side state.
-     If unreachable, silently keep the mock state. */
-  SimOS.reset().catch(function() { /* backend offline — ignore */ });
+  /* Disable controls until backend confirms it's reachable */
+  btnStep.disabled  = true;
+  btnRun.disabled   = true;
+  btnReset.disabled = true;
+
+  /* Attempt to load real initial state from the C backend. */
+  SimOS.reset()
+    .then(function(result) {
+      if (result) {
+        /* Backend responded — hide banner, enable controls */
+        offlineBanner.classList.add('hidden');
+        btnStep.disabled  = false;
+        btnRun.disabled   = false;
+        btnReset.disabled = false;
+      } else {
+        /* Backend unreachable — show banner, keep controls disabled */
+        offlineBanner.classList.remove('hidden');
+      }
+    })
+    .catch(function() {
+      offlineBanner.classList.remove('hidden');
+    });
 
   /* ── Button handlers ────────────────────────────────────────── */
 
@@ -71,11 +90,28 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 
   btnReset.addEventListener('click', function() {
-    SimOS.reset();
-    /* Re-enable step/run controls */
-    btnRun.disabled   = false;
+    var algoMap = { 'HRRN': 1, 'RR': 2, 'MLFQ': 3 };
+    var algoNum = algoMap[algoSelect.value] || 2;
+    var quantum = parseInt(quantumInput.value, 10) || 2;
+    fetch('http://localhost:8080/api/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ algo: algoNum, quantum: quantum })
+    })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        SimOS.loadState(data);
+        offlineBanner.classList.add('hidden');
+        btnStep.disabled  = false;
+        btnRun.disabled   = false;
+        btnReset.disabled = false;
+      })
+      .catch(function() {
+        offlineBanner.classList.remove('hidden');
+        btnStep.disabled  = true;
+        btnRun.disabled   = true;
+      });
     btnPause.disabled = true;
-    btnStep.disabled  = false;
     /* Deselect any inspected process */
     Inspector.select(null);
   });
@@ -118,7 +154,24 @@ document.addEventListener('DOMContentLoaded', function() {
     if (isNaN(v) || v < 1) v = 1;
     if (v > 16) v = 16;
     this.value = v;
-    setState({ timeSlice: v });
+    var algoMap = { 'HRRN': 1, 'RR': 2, 'MLFQ': 3 };
+    var algoNum = algoMap[algoSelect.value] || 2;
+    fetch('http://localhost:8080/api/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ algo: algoNum, quantum: v })
+    })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        SimOS.loadState(data);
+        document.getElementById('btn-run').disabled   = false;
+        document.getElementById('btn-pause').disabled = true;
+        document.getElementById('btn-step').disabled  = false;
+        Inspector.select(null);
+      })
+      .catch(function() {
+        setState({ timeSlice: v });
+      });
   });
 
   /* ── Load JSON modal ────────────────────────────────────────── */

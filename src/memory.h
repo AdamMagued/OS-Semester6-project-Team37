@@ -48,6 +48,7 @@ typedef struct {
     int arrivalTime;
     int burstTime;
     int waitingTime;
+    int finishTick;    /* clock cycle when process finished (for turnaround) */
 } SchedulerInfo;
 
 /* ── Disk Entry for Swapping ── */
