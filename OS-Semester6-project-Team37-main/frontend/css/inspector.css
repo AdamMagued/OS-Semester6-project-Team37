@@ -1,0 +1,187 @@
+/* ══════════════════════════════════════════════════════════════
+   inspector.css
+   PROCESS INSPECTOR panel: PCB fields, variable table, full
+   instruction list with ▶ at current PC, held mutex badges,
+   and global mutex state overview.
+   ══════════════════════════════════════════════════════════════ */
+
+#panel-inspector {
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+}
+
+#inspector-body {
+  flex:           1 1 auto;
+  overflow-y:     auto;
+  padding:        10px;
+  display:        flex;
+  flex-direction: column;
+  gap:            13px;
+}
+
+#inspector-empty {
+  color:      var(--text-dim);
+  font-size:  var(--fs-sm);
+  font-style: italic;
+  margin-top: 10px;
+}
+
+/* ── Inspector section ────────────────────────────────────────── */
+.insp-section {
+  display:        flex;
+  flex-direction: column;
+  gap:            4px;
+}
+
+.insp-section-label {
+  font-size:      var(--fs-xs);
+  font-weight:    700;
+  letter-spacing: 0.12em;
+  color:          var(--text-dim);
+  text-transform: uppercase;
+  border-bottom:  1px solid var(--border-dim);
+  padding-bottom: 3px;
+  margin-bottom:  2px;
+}
+
+/* ── PCB key/value rows ───────────────────────────────────────── */
+.insp-row {
+  display:         flex;
+  justify-content: space-between;
+  align-items:     center;
+  font-size:       var(--fs-xs);
+  padding:         2px 0;
+  gap:             8px;
+}
+
+.insp-key {
+  color:       var(--text-dim);
+  flex-shrink: 0;
+}
+
+.insp-val {
+  color:       var(--text);
+  font-weight: 500;
+  text-align:  right;
+}
+
+/* ── Variable table ───────────────────────────────────────────── */
+.var-table {
+  display:               grid;
+  grid-template-columns: auto 1fr;
+  gap:                   2px 12px;
+  font-size:             var(--fs-xs);
+}
+
+.var-name {
+  color:       var(--mint);
+  font-weight: 600;
+}
+
+.var-value {
+  color:         var(--text);
+  white-space:   nowrap;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Instruction list ─────────────────────────────────────────── */
+.instr-list {
+  display:        flex;
+  flex-direction: column;
+  gap:            1px;
+}
+
+.instr-line {
+  display:     flex;
+  align-items: baseline;
+  gap:         5px;
+  padding:     2px 5px;
+  font-size:   var(--fs-xs);
+  color:       var(--text-dim);
+  line-height: 1.6;
+}
+
+/* Already executed instructions are faded */
+.instr-line.done {
+  opacity: 0.38;
+}
+
+/* Current instruction gets highlighted row */
+.instr-line.current {
+  background:   rgba(0, 255, 157, 0.07);
+  border-left:  2px solid var(--mint);
+  color:        var(--text);
+  font-weight:  600;
+  margin-left:  -5px;
+  padding-left: 3px;
+}
+
+/* PC pointer arrow */
+.instr-ptr {
+  color:       var(--mint);
+  font-weight: 700;
+  width:       10px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* Instruction number */
+.instr-num {
+  color:      var(--border);
+  font-size:  var(--fs-9);
+  width:      14px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.instr-text {
+  flex:        1;
+  white-space: pre-wrap;
+  word-break:  break-all;
+}
+
+/* ── Mutex badges ─────────────────────────────────────────────── */
+.mutex-list {
+  display:   flex;
+  flex-wrap: wrap;
+  gap:       5px;
+}
+
+.mutex-badge {
+  font-size:      var(--fs-xs);
+  font-weight:    600;
+  letter-spacing: 0.06em;
+  padding:        2px 8px;
+  border:         1px solid var(--mint);
+  color:          var(--mint);
+}
+
+.mutex-badge.none {
+  border-color: var(--border);
+  color:        var(--text-dim);
+  font-weight:  400;
+  font-style:   italic;
+}
+
+/* Mutex status table (below held list) */
+.mutex-status-table {
+  margin-top: 6px;
+  display:    flex;
+  flex-direction: column;
+  gap:        2px;
+}
+
+.mutex-status-row {
+  display:         flex;
+  justify-content: space-between;
+  align-items:     center;
+  font-size:       var(--fs-xs);
+  padding:         2px 0;
+}
+
+.mx-name  { color: var(--text-dim); }
+.mx-state { font-weight: 600; }
+.mx-free  { color: var(--mint);  }
+.mx-held  { color: var(--amber); }
