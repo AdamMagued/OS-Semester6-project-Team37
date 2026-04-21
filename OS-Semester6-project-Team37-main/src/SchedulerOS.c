@@ -497,9 +497,7 @@ static void resetSimulation(void) {
     // Clear shared simulation files to prevent cross-session leaks
     remove("test.txt"); 
     
-    // Reset configuration to factory defaults
-    algo = 2; 
-    quantum = 2;
+    // Wait, do not reset algo and quantum here, otherwise API changes are ignored.
     
     initSimulation();
     printf("[OS] Simulation RESET performed - all states cleared.\n");

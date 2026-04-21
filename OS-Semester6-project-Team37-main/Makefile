@@ -18,8 +18,14 @@ all: $(BINDIR) $(TARGET)
 $(BINDIR):
 	mkdir -p $(BINDIR)
 
+ifeq ($(OS),Windows_NT)
+	LDFLAGS = -lws2_32
+else
+	LDFLAGS = 
+endif
+
 $(TARGET): $(SRCS)
-	$(CC) $(CFLAGS) -o $@ $^ -lws2_32
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 run: all
 	./$(TARGET)
