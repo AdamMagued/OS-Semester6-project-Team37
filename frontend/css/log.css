@@ -1,0 +1,104 @@
+/* ══════════════════════════════════════════════════════════════
+   log.css
+   Full-width LOG panel: terminal-style event feed with type-
+   coloured entries, clock badge, and slide-in animation for
+   newly appended lines.
+   ══════════════════════════════════════════════════════════════ */
+
+#panel-log {
+  position:       relative;
+  flex:           0 0 180px;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  /* top border already provided by the panel class */
+  margin:         0 6px 6px;
+  border:         1px solid var(--border);
+}
+
+/* Clock badge — top-right corner */
+#clock-badge {
+  position:       absolute;
+  top:            5px;
+  right:          10px;
+  font-size:      var(--fs-xs);
+  font-weight:    600;
+  color:          var(--text-dim);
+  letter-spacing: 0.10em;
+  z-index:        2;
+}
+
+#clock-badge #clock-display {
+  font-size:   var(--fs-md);
+  font-weight: 700;
+  color:       var(--mint);
+  margin-left: 2px;
+}
+
+/* ── Entries container ────────────────────────────────────────── */
+#log-entries {
+  flex:           1 1 auto;
+  overflow-y:     auto;
+  overflow-x:     hidden;
+  padding:        3px 0;
+  display:        flex;
+  flex-direction: column;
+}
+
+/* Single log line */
+.log-entry {
+  display:     flex;
+  align-items: baseline;
+  padding:     2px 10px;
+  font-size:   var(--fs-xs);
+  line-height: 1.75;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.log-entry:hover { background: rgba(255,255,255,0.02); }
+
+/* Clock column */
+.log-clock {
+  color:       var(--text-dim);
+  min-width:   80px;
+  flex-shrink: 0;
+}
+
+/* PID column */
+.log-pid {
+  min-width:   70px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+/* Event text */
+.log-event { flex: 1; }
+
+/* ── Type colour themes ───────────────────────────────────────── */
+
+/* scheduling — mint */
+.log-entry.scheduling .log-pid   { color: var(--mint); }
+.log-entry.scheduling .log-event { color: var(--mint); }
+
+/* blocking — amber */
+.log-entry.blocking .log-pid   { color: var(--amber); }
+.log-entry.blocking .log-event { color: var(--amber); }
+
+/* memory-swap — blue */
+.log-entry.memory-swap .log-pid   { color: var(--blue); }
+.log-entry.memory-swap .log-event { color: var(--blue); }
+
+/* execution — output / assignments — vibrant purple */
+.log-entry.execution .log-pid   { color: #d4a3ff; }
+.log-entry.execution .log-event { color: #e9d5ff; font-weight: 500; }
+
+/* finish — bright white */
+.log-entry.finish .log-pid   { color: var(--text); }
+.log-entry.finish .log-event { color: var(--text); font-weight: 600; }
+
+/* ── New-entry slide-in ───────────────────────────────────────── */
+.log-entry.slide-in {
+  animation: slide-in-left 0.20s ease-out;
+}
+.log-entry.clickable { cursor: pointer; transition: background 0.1s; }
+.log-entry.clickable:hover { background: rgba(255, 255, 255, 0.05); }

@@ -1,0 +1,239 @@
+/* ══════════════════════════════════════════════════════════════
+   scheduler.css
+   SCHEDULER panel: large running card with animated time-slice
+   bar, ready queue, and blocked queue with per-process cards.
+   Algorithm-adaptive metadata on each card (RR / HRRN / MLFQ).
+   ══════════════════════════════════════════════════════════════ */
+
+#panel-scheduler {
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+}
+
+.sched-section-label {
+  font-size:      var(--fs-xs);
+  font-weight:    700;
+  letter-spacing: 0.14em;
+  color:          var(--text-dim);
+  padding:        6px 10px 3px;
+  text-transform: uppercase;
+  flex-shrink:    0;
+}
+
+/* ── Running section ──────────────────────────────────────────── */
+#sched-running-wrap {
+  flex-shrink:   0;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 8px;
+}
+
+#running-card {
+  margin:  4px 8px 0;
+  padding: 10px 13px;
+  background: rgba(0, 255, 157, 0.05);
+  border:     1px solid rgba(0, 255, 157, 0.28);
+  min-height: 68px;
+  display:    flex;
+  flex-direction: column;
+  gap:        4px;
+  position:   relative;
+}
+
+#running-card.empty {
+  background:   var(--surface);
+  border-color: var(--border-dim);
+  align-items:  center;
+  justify-content: center;
+}
+
+.running-pid {
+  font-size:   var(--fs-xl);
+  font-weight: 700;
+  color:       var(--mint);
+  line-height: 1;
+}
+
+.running-instruction {
+  font-size:   var(--fs-sm);
+  font-weight: 500;
+  color:       var(--text);
+}
+
+.running-meta {
+  font-size: var(--fs-xs);
+  color:     var(--text-dim);
+}
+
+.running-idle {
+  font-size:  var(--fs-sm);
+  color:      var(--text-dim);
+  font-style: italic;
+}
+
+/* Time-slice depleting bar */
+#timeslice-track {
+  height:     4px;
+  background: var(--border-dim);
+  margin:     8px 8px 0;
+  /* Don't clip overflow so the glow is visible */
+  overflow:   visible;
+  position:   relative;
+}
+
+#timeslice-bar {
+  height:           100%;
+  width:            100%;
+  background:       var(--mint);
+  transition:       width 0.85s linear, background 0.3s, box-shadow 0.3s;
+  transform-origin: left;
+  box-shadow:       0 0 8px var(--mint), 0 0 16px rgba(0, 255, 157, 0.40);
+}
+
+#timeslice-bar.depleted {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber), 0 0 16px rgba(255, 170, 0, 0.40);
+}
+
+/* ── Ready queue ──────────────────────────────────────────────── */
+/* flex: 0 1 auto so it sizes to its content rather than
+   force-stretching and creating a hollow gap above blocked. */
+#sched-ready-wrap {
+  flex:           0 1 auto;
+  display:        flex;
+  flex-direction: column;
+  border-bottom:  1px solid var(--border-dim);
+  overflow:       hidden;
+  max-height:     55%;   /* cap at 55% so blocked always stays visible */
+  min-height:     30px;  /* always show the section label */
+}
+
+#ready-queue {
+  flex:           1 1 auto;
+  overflow-y:     auto;
+  padding:        4px 8px 6px;
+  display:        flex;
+  flex-direction: column;
+  gap:            4px;
+}
+
+/* ── Blocked queue ────────────────────────────────────────────── */
+/* flex: 0 0 auto — natural content height, sits directly below ready */
+#sched-blocked-wrap {
+  flex:           0 0 auto;
+  display:        flex;
+  flex-direction: column;
+  overflow:       hidden;
+  max-height:     35%;
+}
+
+#blocked-queue {
+  overflow-y:     auto;
+  padding:        4px 8px 6px;
+  display:        flex;
+  flex-direction: column;
+  gap:            4px;
+}
+
+/* Pseudo-element absorbs any remaining panel space below blocked,
+   so empty space collects at the bottom rather than between queues. */
+#panel-scheduler::after {
+  content:  '';
+  display:  block;
+  flex:     1 1 auto;
+  min-height: 0;
+}
+
+/* ── Queue card ───────────────────────────────────────────────── */
+.queue-card {
+  display:    flex;
+  background: var(--surface);
+  border:     1px solid var(--border-dim);
+  cursor:     pointer;
+  transition: border-color 0.15s;
+  position:   relative;
+  flex-shrink: 0;
+}
+.queue-card:hover    { border-color: var(--text-dim); }
+.queue-card.selected { border-color: var(--mint);     }
+.queue-card.blocked  { opacity: 0.72;                 }
+
+/* Left colour stripe (process identity) */
+.queue-card-stripe {
+  width:       3px;
+  flex-shrink: 0;
+  background:  var(--border);
+}
+.queue-card.pid-1 .queue-card-stripe { background: var(--mint);   }
+.queue-card.pid-2 .queue-card-stripe { background: var(--blue);   }
+.queue-card.pid-3 .queue-card-stripe { background: var(--purple); }
+.queue-card.pid-4 .queue-card-stripe { background: #ffcc00;        }
+
+/* Card body */
+.queue-card-body {
+  flex:           1;
+  padding:        5px 8px;
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+  min-width:      0;
+}
+
+.card-pid-label {
+  font-size:   var(--fs-sm);
+  font-weight: 700;
+  color:       var(--text);
+}
+.card-pid-label .pid-state {
+  font-size:   var(--fs-xs);
+  font-weight: 400;
+  color:       var(--text-dim);
+  margin-left: 5px;
+}
+
+.card-instruction {
+  font-size:     var(--fs-xs);
+  color:         var(--text-dim);
+  white-space:   nowrap;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+}
+
+.card-stats {
+  display:    flex;
+  gap:        10px;
+  margin-top: 1px;
+}
+
+.card-stat {
+  font-size:      var(--fs-9);
+  color:          var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.card-stat span  { color: var(--text); }
+
+.card-resource {
+  font-size:   var(--fs-xs);
+  color:       var(--amber);
+  font-weight: 600;
+}
+
+/* MLFQ queue-level badge on right side of card */
+.queue-level-badge {
+  align-self:  center;
+  flex-shrink: 0;
+  margin-right: 8px;
+  font-size:    var(--fs-xs);
+  font-weight:  600;
+  color:        var(--text-dim);
+  border:       1px solid var(--border);
+  padding:      1px 5px;
+}
+
+/* Empty queue placeholder */
+.empty-queue-msg {
+  color:      var(--border);
+  font-size:  var(--fs-xs);
+  font-style: italic;
+  padding:    3px 2px;
+}

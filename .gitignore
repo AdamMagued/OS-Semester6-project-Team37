@@ -1,0 +1,7 @@
+bin/*.exe
+full_log.txt
+*.o
+.DS_Store
+node_modules/
+dist/
+build/

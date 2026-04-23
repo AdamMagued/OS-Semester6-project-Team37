@@ -1,0 +1,408 @@
+/* ══════════════════════════════════════════════════════════════
+   main.css
+   Base reset, CSS custom properties, page layout scaffolding,
+   controls bar, modal dialog, shared utility classes & animations.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Custom Properties ────────────────────────────────────────── */
+:root {
+  /* Background / surface */
+  --bg:         #0a0a0f;
+  --panel-bg:   #0d0d17;
+  --surface:    #111120;
+
+  /* Text */
+  --text:       #e8e6df;
+  --text-dim:   #7a7a8a;
+
+  /* Accent palette */
+  --mint:       #00ff9d;   /* running / active */
+  --amber:      #ffaa00;   /* blocked / warning */
+  --blue:       #009dff;   /* memory swaps */
+  --purple:     #9d6bff;   /* process 3 */
+  --red:        #ff4455;   /* danger */
+
+  /* Borders */
+  --border:     #3a3a4a;
+  --border-dim: #1e1e2e;
+
+  /* Per-process identity tints (bg + left stripe) */
+  --p1-bg:      rgba(0,   255, 157,  0.06);
+  --p1-border:  rgba(0,   255, 157,  0.40);
+  --p2-bg:      rgba(0,   157, 255,  0.06);
+  --p2-border:  rgba(0,   157, 255,  0.40);
+  --p3-bg:      rgba(157, 107, 255,  0.06);
+  --p3-border:  rgba(157, 107, 255,  0.40);
+
+  /* Memory panel resizable width (controlled by drag in main.js) */
+  --memory-width: 280px;
+
+  /* Typography */
+  --font:   'JetBrains Mono', monospace;
+  --fs-8:   8px;
+  --fs-9:   9px;
+  --fs-xs:  10px;
+  --fs-sm:  11px;
+  --fs-md:  13px;
+  --fs-lg:  15px;
+  --fs-xl:  18px;
+}
+
+/* ── Reset ────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  background:  var(--bg);
+  color:       var(--text);
+  font-family: var(--font);
+  font-size:   var(--fs-md);
+  display:     flex;
+  flex-direction: column;
+  height:      100vh;
+  overflow:    hidden;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 5px; height: 5px; }
+::-webkit-scrollbar-track        { background: transparent; }
+::-webkit-scrollbar-thumb        { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover  { background: var(--text-dim); }
+
+/* ── Panel base ───────────────────────────────────────────────── */
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  position: relative;
+}
+
+.panel-label {
+  font-size:      var(--fs-xs);
+  font-weight:    600;
+  letter-spacing: 0.12em;
+  color:          var(--text-dim);
+  padding:        5px 10px;
+  border-bottom:  1px solid var(--border-dim);
+  text-transform: uppercase;
+  flex-shrink:    0;
+}
+
+.panel-sublabel {
+  font-size:      var(--fs-xs);
+  font-weight:    600;
+  letter-spacing: 0.12em;
+  color:          var(--text-dim);
+  padding:        4px 10px;
+  border-top:     1px solid var(--border-dim);
+  border-bottom:  1px solid var(--border-dim);
+  text-transform: uppercase;
+  flex-shrink:    0;
+}
+
+/* ── Offline banner ───────────────────────────────────────────── */
+#offline-banner {
+  background:  rgba(255, 80, 80, 0.12);
+  border-bottom: 1px solid rgba(255, 80, 80, 0.35);
+  padding:     10px 16px;
+  font-size:   var(--fs-sm);
+  color:       #ff8080;
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+}
+#offline-banner code {
+  background:    rgba(255,255,255,0.07);
+  border:        1px solid rgba(255,255,255,0.12);
+  padding:       1px 6px;
+  font-family:   var(--font);
+  font-size:     inherit;
+  color:         var(--text);
+}
+
+/* ── Page structure ───────────────────────────────────────────── */
+#controls-bar {
+  flex:            0 0 auto;
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding:         0 14px;
+  height:          44px;
+  background:      var(--surface);
+  border-bottom:   1px solid var(--border);
+  z-index:         20;
+}
+
+#main-grid {
+  flex:                  1 1 auto;
+  display:               grid;
+  /* Memory width is driven by --memory-width (resizable via drag handle).
+     Scheduler takes all remaining space. Inspector is fixed at 260px. */
+  grid-template-columns: var(--memory-width) 1fr 260px;
+  grid-template-rows:    1fr;
+  gap:                   6px;
+  padding:               6px 6px 0;
+  min-height:            0;
+  overflow:              hidden;
+}
+
+/* Log panel sits below the grid as a flex sibling */
+#panel-log {
+  flex:         0 0 180px;
+  display:      flex;
+  flex-direction: column;
+  border-left:  none;
+  border-right: none;
+  border-bottom: none;
+}
+
+/* ── Controls bar ─────────────────────────────────────────────── */
+#controls-title {
+  font-size:      var(--fs-xl);
+  font-weight:    700;
+  letter-spacing: 0.10em;
+  color:          var(--mint);
+}
+
+#controls-right {
+  display:     flex;
+  align-items: center;
+  gap:         7px;
+}
+
+/* Buttons */
+.ctrl-btn {
+  background:     var(--surface);
+  color:          var(--text);
+  border:         1px solid var(--border);
+  font-family:    var(--font);
+  font-size:      var(--fs-xs);
+  font-weight:    600;
+  letter-spacing: 0.10em;
+  padding:        4px 11px;
+  cursor:         pointer;
+  transition:     border-color 0.15s, color 0.15s, background 0.15s;
+  white-space:    nowrap;
+}
+.ctrl-btn:hover:not(:disabled) { border-color: var(--mint); color: var(--mint); }
+.ctrl-btn:disabled              { opacity: 0.35; cursor: not-allowed; }
+
+.ctrl-btn--primary { border-color: var(--mint); color: var(--mint); }
+.ctrl-btn--primary:hover:not(:disabled) { background: rgba(0,255,157,0.08); }
+
+.ctrl-btn--danger  { border-color: var(--red); color: var(--red); }
+.ctrl-btn--danger:hover:not(:disabled)  { background: rgba(255,68,85,0.08); }
+
+/* Labels / readouts */
+.ctrl-label {
+  font-size:      var(--fs-xs);
+  color:          var(--text-dim);
+  letter-spacing: 0.10em;
+}
+.ctrl-readout {
+  font-size: var(--fs-sm);
+  color:     var(--text);
+  min-width: 24px;
+}
+
+/* Vertical separator */
+.ctrl-sep {
+  width:      1px;
+  height:     20px;
+  background: var(--border);
+  margin:     0 2px;
+}
+
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance:         none;
+  width:              76px;
+  height:             3px;
+  background:         var(--border);
+  outline:            none;
+  cursor:             pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width:  11px;
+  height: 11px;
+  background: var(--mint);
+  cursor:     pointer;
+}
+
+/* Number input */
+input[type="number"] {
+  background:  var(--surface);
+  color:       var(--text);
+  border:      1px solid var(--border);
+  font-family: var(--font);
+  font-size:   var(--fs-sm);
+  padding:     3px 6px;
+  width:       46px;
+  text-align:  center;
+  outline:     none;
+  transition:  border-color 0.15s;
+}
+input[type="number"]:focus { border-color: var(--mint); }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { opacity: 0.4; }
+
+/* Select */
+select {
+  background:     var(--surface);
+  color:          var(--text);
+  border:         1px solid var(--border);
+  font-family:    var(--font);
+  font-size:      var(--fs-xs);
+  font-weight:    600;
+  letter-spacing: 0.08em;
+  padding:        4px 8px;
+  outline:        none;
+  cursor:         pointer;
+  transition:     border-color 0.15s;
+}
+select:focus { border-color: var(--mint); }
+
+/* ── Modal ────────────────────────────────────────────────────── */
+#modal-overlay {
+  position:       fixed;
+  inset:          0;
+  background:     rgba(10, 10, 15, 0.88);
+  display:        flex;
+  align-items:    center;
+  justify-content: center;
+  z-index:        100;
+}
+#modal-overlay.hidden { display: none; }
+
+#modal-box {
+  background: var(--surface);
+  border:     1px solid var(--border);
+  padding:    20px;
+  width:      540px;
+  display:    flex;
+  flex-direction: column;
+  gap:        12px;
+}
+
+.modal-title {
+  font-size:      var(--fs-xs);
+  font-weight:    700;
+  letter-spacing: 0.14em;
+  color:          var(--text-dim);
+}
+
+#modal-textarea {
+  background:  var(--bg);
+  color:       var(--text);
+  border:      1px solid var(--border);
+  font-family: var(--font);
+  font-size:   var(--fs-sm);
+  padding:     10px;
+  height:      240px;
+  resize:      vertical;
+  outline:     none;
+  overflow:    auto;
+  white-space: pre;
+  transition:  border-color 0.15s;
+}
+#modal-textarea:focus { border-color: var(--mint); }
+
+.modal-actions {
+  display:         flex;
+  justify-content: flex-end;
+  gap:             8px;
+}
+
+/* ── Input prompt modal ───────────────────────────────────────── */
+#input-overlay {
+  position:        fixed;
+  inset:           0;
+  background:      rgba(10, 10, 15, 0.88);
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  z-index:         100;
+}
+#input-overlay.hidden { display: none; }
+
+#input-box {
+  background:      var(--surface);
+  border:          1px solid var(--border);
+  padding:         20px;
+  width:           380px;
+  display:         flex;
+  flex-direction:  column;
+  gap:             12px;
+}
+
+#input-prompt-text {
+  color:           var(--text);
+  font-size:       var(--fs-sm);
+}
+
+#input-value {
+  background:      var(--bg);
+  color:           var(--text);
+  border:          1px solid var(--border);
+  font-family:     var(--font);
+  font-size:       var(--fs-sm);
+  padding:         8px 10px;
+  outline:         none;
+  transition:      border-color 0.15s;
+}
+#input-value:focus { border-color: var(--mint); }
+
+/* ── Utility ──────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
+/* State badges (used in inspector) */
+.badge {
+  font-size:      var(--fs-xs);
+  font-weight:    700;
+  letter-spacing: 0.08em;
+  padding:        1px 6px;
+  border:         1px solid currentColor;
+  text-transform: uppercase;
+}
+.badge--running  { color: var(--mint);     }
+.badge--ready    { color: var(--text-dim); }
+.badge--blocked  { color: var(--amber);    }
+.badge--finished { color: #666;            }
+
+/* ── Animations ───────────────────────────────────────────────── */
+
+/* Flash the running card when a new process is scheduled */
+@keyframes flash-running {
+  0%   { background: rgba(0, 255, 157, 0.22); }
+  100% { background: rgba(0, 255, 157, 0.05); }
+}
+
+/* Pulse a memory cell on write */
+@keyframes pulse-write {
+  0%   { background: rgba(0, 255, 157, 0.30); }
+  100% { background: inherit; }
+}
+
+/* Slide log entries in from the left */
+@keyframes slide-in-left {
+  from { transform: translateX(-14px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+/* Shimmer-fade when a process is swapped to disk */
+@keyframes shimmer-out {
+  0%   { opacity: 1;   }
+  40%  { opacity: 0.2; }
+  100% { opacity: 0.5; }
+}
+
+.flash        { animation: flash-running  0.45s ease-out; }
+.pulse-write  { animation: pulse-write    0.35s ease-out; }
+.slide-in     { animation: slide-in-left  0.20s ease-out; }
+.shimmer      { animation: shimmer-out    0.65s ease-in-out forwards; }
