@@ -88,9 +88,13 @@
 .log-entry.memory-swap .log-pid   { color: var(--blue); }
 .log-entry.memory-swap .log-event { color: var(--blue); }
 
-/* execution — output / assignments — vibrant purple */
+/* execution — assignments — vibrant purple */
 .log-entry.execution .log-pid   { color: #d4a3ff; }
 .log-entry.execution .log-event { color: #e9d5ff; font-weight: 500; }
+
+/* output — program outputs — bright green */
+.log-entry.output .log-pid   { color: #00ff9d; }
+.log-entry.output .log-event { color: #00ff9d; font-weight: bold; }
 
 /* finish — bright white */
 .log-entry.finish .log-pid   { color: var(--text); }

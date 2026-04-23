@@ -17,7 +17,7 @@ void sys_print(int pid, const char *text) {
     /* Also add to the system log so it appears in the GUI */
     char logMsg[256];
     snprintf(logMsg, sizeof(logMsg), "P%d: %s", pid, text);
-    addLog(pid, logMsg, "execution");
+    addLog(pid, logMsg, "output");
 }
 
 /* ── Input queue for HTTP-server mode ───────────────────────────

@@ -163,6 +163,33 @@ var Inspector = (function() {
     '</div>';
   }
 
+  /* ── Section: Output Console ────────────────────────────────── */
+  function _buildOutput(proc, state) {
+    var logs = state.log || [];
+    var outputLines = '';
+    
+    logs.forEach(function(entry) {
+      if (entry.pid === proc.pid && entry.type === 'output') {
+        var eventStr = entry.event || '';
+        // Extract just the output text after "P#: " if present
+        var match = eventStr.match(/^P\d+:\s*(.*)$/);
+        if (match) {
+          eventStr = match[1];
+        }
+        outputLines += _esc(eventStr) + '\n';
+      }
+    });
+
+    if (outputLines === '') {
+      outputLines = '<span style="color:var(--text-dim);font-style:italic">(no output)</span>';
+    }
+
+    return '<div class="insp-section">' +
+      '<div class="insp-section-label">Output Console</div>' +
+      '<div class="output-console">' + outputLines + '</div>' +
+    '</div>';
+  }
+
   /* ── Public: render ─────────────────────────────────────────── */
   /* Called by subscribe() on every setState — keeps the panel live. */
   function render(state) {
@@ -187,7 +214,8 @@ var Inspector = (function() {
       _buildPCB(proc) +
       _buildVars(proc) +
       _buildInstructions(proc) +
-      _buildMutexes(proc, state.mutexes);
+      _buildMutexes(proc, state.mutexes) +
+      _buildOutput(proc, state);
   }
 
   /* ── Public: select ─────────────────────────────────────────── */
@@ -217,7 +245,8 @@ var Inspector = (function() {
           _buildPCB(proc) +
           _buildVars(proc) +
           _buildInstructions(proc) +
-          _buildMutexes(proc, state.mutexes);
+          _buildMutexes(proc, state.mutexes) +
+          _buildOutput(proc, state);
       } else {
         bodyEl.innerHTML =
           '<div id="inspector-empty">P' + _selectedPid + ' not found in state</div>';

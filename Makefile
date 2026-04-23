@@ -19,9 +19,9 @@ $(BINDIR):
 	mkdir -p $(BINDIR)
 
 ifeq ($(OS),Windows_NT)
-	LDFLAGS = -lws2_32
+LDFLAGS = -lws2_32
 else
-	LDFLAGS = 
+LDFLAGS = 
 endif
 
 $(TARGET): $(SRCS)

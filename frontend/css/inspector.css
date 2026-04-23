@@ -185,3 +185,20 @@
 .mx-state { font-weight: 600; }
 .mx-free  { color: var(--mint);  }
 .mx-held  { color: var(--amber); }
+
+/* ── Output console ──────────────────────────────────────────── */
+.output-console {
+  background:    rgba(0, 0, 0, 0.45);
+  border:        1px solid rgba(0, 255, 157, 0.18);
+  border-radius: 4px;
+  padding:       8px 10px;
+  font-size:     var(--fs-xs);
+  font-family:   'JetBrains Mono', monospace;
+  color:         #00ff9d;
+  white-space:   pre-wrap;
+  word-break:    break-all;
+  max-height:    140px;
+  overflow-y:    auto;
+  line-height:   1.7;
+  text-shadow:   0 0 6px rgba(0, 255, 157, 0.25);
+}
