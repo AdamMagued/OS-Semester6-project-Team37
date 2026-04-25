@@ -120,14 +120,35 @@ var Memory = (function() {
     return cell;
   }
 
-  /* ── Build a disk entry row ─────────────────────────────────── */
+  /* ── Build a disk entry block with all stored words ─────────── */
   function _buildDiskEntry(entry) {
-    var div = document.createElement('div');
-    div.className = 'disk-entry';
-    div.innerHTML =
+    var wrap = document.createElement('div');
+    wrap.className = 'disk-entry';
+
+    var header = document.createElement('div');
+    header.className = 'disk-entry-header';
+    header.innerHTML =
       '<span class="disk-pid">P' + entry.pid + '</span>' +
-      '<span class="disk-data">' + _esc(_trunc(entry.data || '(swapped)', 44)) + '</span>';
-    return div;
+      '<span class="disk-meta">' + (entry.blockSize || 0) + ' words</span>';
+    wrap.appendChild(header);
+
+    var words = entry.words || [];
+    if (words.length > 0) {
+      var table = document.createElement('div');
+      table.className = 'disk-words';
+      words.forEach(function(w, idx) {
+        var row = document.createElement('div');
+        row.className = 'disk-word-row';
+        row.innerHTML =
+          '<span class="disk-word-idx">[' + idx + ']</span>' +
+          '<span class="disk-word-name">' + _esc(_trunc(w.name  || '', 20)) + '</span>' +
+          '<span class="disk-word-val">'  + _esc(_trunc(w.value || '', 28)) + '</span>';
+        table.appendChild(row);
+      });
+      wrap.appendChild(table);
+    }
+
+    return wrap;
   }
 
   /* ── Public render ──────────────────────────────────────────── */

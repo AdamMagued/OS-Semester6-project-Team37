@@ -405,9 +405,15 @@ char *serializeState(void) {
             if (!disk[i].isOccupied) continue;
             if (!first) AP(",");
             first = 0;
-            snprintf(e1, sizeof(e1), "swapped (%d words)", disk[i].blockSize);
-            jsonEsc(e1, e2, sizeof(e2));
-            AP("{\"pid\":%d,\"data\":\"%s\"}", disk[i].processId, e2);
+            AP("{\"pid\":%d,\"blockSize\":%d,\"words\":[",
+               disk[i].processId, disk[i].blockSize);
+            for (int j = 0; j < disk[i].blockSize; j++) {
+                if (j > 0) AP(",");
+                jsonEsc(disk[i].block[j].name,  e1, sizeof(e1));
+                jsonEsc(disk[i].block[j].value, e2, sizeof(e2));
+                AP("{\"name\":\"%s\",\"value\":\"%s\"}", e1, e2);
+            }
+            AP("]}");
         }
     }
     AP("],");

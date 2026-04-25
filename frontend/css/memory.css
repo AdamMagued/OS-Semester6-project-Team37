@@ -171,36 +171,61 @@
 /* ── Disk list ────────────────────────────────────────────────── */
 #disk-list {
   padding:        5px 7px;
-  max-height:     90px;
+  max-height:     160px;
   overflow-y:     auto;
   display:        flex;
   flex-direction: column;
-  gap:            3px;
+  gap:            4px;
   flex-shrink:    0;
 }
 
 .disk-entry {
+  display:        flex;
+  flex-direction: column;
+  background:     var(--surface);
+  border:         1px solid var(--border-dim);
+  font-size:      var(--fs-xs);
+  overflow:       hidden;
+}
+
+.disk-entry-header {
   display:     flex;
   align-items: center;
   gap:         8px;
   padding:     4px 8px;
-  background:  var(--surface);
-  border:      1px solid var(--border-dim);
-  font-size:   var(--fs-xs);
+  border-bottom: 1px solid var(--border-dim);
 }
 
 .disk-pid {
-  color:       var(--text-dim);
-  font-weight: 600;
+  color:       var(--amber);
+  font-weight: 700;
   flex-shrink: 0;
 }
-.disk-data {
-  color:         var(--text);
-  flex:          1;
-  white-space:   nowrap;
-  overflow:      hidden;
-  text-overflow: ellipsis;
+
+.disk-meta {
+  color:     var(--text-dim);
+  font-size: var(--fs-9);
 }
+
+.disk-words {
+  display:        flex;
+  flex-direction: column;
+  padding:        2px 0;
+}
+
+.disk-word-row {
+  display:   grid;
+  grid-template-columns: 28px 1fr 1fr;
+  gap:       4px;
+  padding:   1px 8px;
+  font-size: var(--fs-9);
+  line-height: 1.5;
+}
+.disk-word-row:hover { background: rgba(255,255,255,0.03); }
+
+.disk-word-idx  { color: var(--text-dim); text-align: right; font-size: var(--fs-8); }
+.disk-word-name { color: var(--text-dim); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disk-word-val  { color: var(--text);     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .disk-empty {
   color:      var(--border);
