@@ -365,9 +365,19 @@ document.addEventListener('DOMContentLoaded', function() {
       quantumInput.value = qt;
     }
     if (state.arrivalTimes && state.arrivalTimes.length === 3) {
-      arriveP1.value = state.arrivalTimes[0];
-      arriveP2.value = state.arrivalTimes[1];
-      arriveP3.value = state.arrivalTimes[2];
+      /* Don't clobber an input the user is currently editing */
+      if (document.activeElement !== arriveP1 &&
+          String(arriveP1.value) !== String(state.arrivalTimes[0])) {
+        arriveP1.value = state.arrivalTimes[0];
+      }
+      if (document.activeElement !== arriveP2 &&
+          String(arriveP2.value) !== String(state.arrivalTimes[1])) {
+        arriveP2.value = state.arrivalTimes[1];
+      }
+      if (document.activeElement !== arriveP3 &&
+          String(arriveP3.value) !== String(state.arrivalTimes[2])) {
+        arriveP3.value = state.arrivalTimes[2];
+      }
     }
   });
 

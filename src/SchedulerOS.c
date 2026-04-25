@@ -1067,12 +1067,17 @@ static void handleRequest(int fd) {
         // optional arrival times: {"arrivals": [0, 1, 4]}
         int tmpArrivals[MAX_PROCESSES];
         int nArr = jsonGetIntArray(body, "\"arrivals\"", tmpArrivals, n);
-        if (nArr == n) {
-            for (int i = 0; i < n; i++)
-                arrivalTimes[i] = tmpArrivals[i];
-        }
 
         resetSimulation();
+
+        // Apply arrivals AFTER reset so initSimulation() doesn't clobber them
+        if (nArr == n) {
+            for (int i = 0; i < n; i++) {
+                arrivalTimes[i] = tmpArrivals[i];
+                processes[i].arrivalTime = tmpArrivals[i];
+                processList[i].arrivalTime = tmpArrivals[i];
+            }
+        }
 
         char *json = serializeState();
         sendResponse(fd, 200, json, (int)strlen(json));
