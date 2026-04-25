@@ -27,6 +27,17 @@ document.addEventListener('DOMContentLoaded', function() {
   var algoSelect   = document.getElementById('algo-select');
   var quantumInput = document.getElementById('quantum-input');
   var btnLoad      = document.getElementById('btn-load');
+  var arriveP1     = document.getElementById('arrive-p1');
+  var arriveP2     = document.getElementById('arrive-p2');
+  var arriveP3     = document.getElementById('arrive-p3');
+
+  function _getArrivals() {
+    return [
+      Math.max(0, parseInt(arriveP1.value, 10) || 0),
+      Math.max(0, parseInt(arriveP2.value, 10) || 0),
+      Math.max(0, parseInt(arriveP3.value, 10) || 0)
+    ];
+  }
 
   var modalOverlay  = document.getElementById('modal-overlay');
   var modalTextarea = document.getElementById('modal-textarea');
@@ -96,7 +107,7 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch('http://localhost:8080/api/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ algo: algoNum, quantum: quantum })
+      body: JSON.stringify({ algo: algoNum, quantum: quantum, arrivals: _getArrivals() })
     })
       .then(function(res) { return res.json(); })
       .then(function(data) {
@@ -131,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch('http://localhost:8080/api/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ algo: algoNum, quantum: parseInt(quantumInput.value, 10) || 2 })
+      body: JSON.stringify({ algo: algoNum, quantum: parseInt(quantumInput.value, 10) || 2, arrivals: _getArrivals() })
     })
       .then(function(res) { return res.json(); })
       .then(function(data) {
@@ -159,7 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch('http://localhost:8080/api/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ algo: algoNum, quantum: v })
+      body: JSON.stringify({ algo: algoNum, quantum: v, arrivals: _getArrivals() })
     })
       .then(function(res) { return res.json(); })
       .then(function(data) {
@@ -320,6 +331,29 @@ document.addEventListener('DOMContentLoaded', function() {
     document.body.style.userSelect = '';
   });
 
+  /* ── Arrival time inputs — reset simulation on change ─────── */
+  function _onArrivalChange() {
+    var algoMap = { 'HRRN': 1, 'RR': 2, 'MLFQ': 3 };
+    var algoNum = algoMap[algoSelect.value] || 2;
+    fetch('http://localhost:8080/api/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ algo: algoNum, quantum: parseInt(quantumInput.value, 10) || 2, arrivals: _getArrivals() })
+    })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        SimOS.loadState(data);
+        document.getElementById('btn-run').disabled   = false;
+        document.getElementById('btn-pause').disabled = true;
+        document.getElementById('btn-step').disabled  = false;
+        Inspector.select(null);
+      })
+      .catch(function() {});
+  }
+  arriveP1.addEventListener('change', _onArrivalChange);
+  arriveP2.addEventListener('change', _onArrivalChange);
+  arriveP3.addEventListener('change', _onArrivalChange);
+
   /* ── Keep controls in sync when state loaded externally ─────── */
   /* e.g. after SimOS.loadState() or fetchState() from C backend */
   subscribe(function(state) {
@@ -329,6 +363,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var qt = String(state.timeSlice || 2);
     if (quantumInput.value !== qt) {
       quantumInput.value = qt;
+    }
+    if (state.arrivalTimes && state.arrivalTimes.length === 3) {
+      arriveP1.value = state.arrivalTimes[0];
+      arriveP2.value = state.arrivalTimes[1];
+      arriveP3.value = state.arrivalTimes[2];
     }
   });
 

@@ -231,6 +231,7 @@ char *serializeState(void) {
     AP("\"clock\":%d,", tick);
     AP("\"algorithm\":\"%s\",", algoStr);
     AP("\"timeSlice\":%d,", tsSlice);
+    AP("\"arrivalTimes\":[%d,%d,%d],", arrivalTimes[0], arrivalTimes[1], arrivalTimes[2]);
 
     if (runningPid != -1)
         AP("\"runningPid\":%d,", runningPid);
