@@ -1286,6 +1286,7 @@ void printMLFQQueues(int q1[], int q1sz, int q2[], int q2sz,
 
 int ensureInMemory(int pid, Process procs[], int count, int cr) {
     (void)cr;
+    char evtBuf[256];
     if (!procs[pid - 1].isSwappedOut) return 1;
 
     for (int k = 0; k < count; k++) {
@@ -1297,14 +1298,26 @@ int ensureInMemory(int pid, Process procs[], int count, int cr) {
         }
     }
 
-    if (swapIn(&procs[pid - 1]) != -1) return 1;
+    if (swapIn(&procs[pid - 1]) != -1) {
+    snprintf(evtBuf, sizeof(evtBuf),
+             "P%d swapped in — allocated memory [%d-%d]",
+             pid, procs[pid-1].pcb.lowerBound, procs[pid-1].pcb.upperBound);
+    addLog(pid, evtBuf, "memory-swap");
+    return 1;
+    }
 
     for (int k = 0; k < count; k++) {
         if (!procs[k].isCreated || procs[k].isSwappedOut) continue;
         if (procs[k].id == pid) continue;
         if (strcmp(procs[k].pcb.state, "FINISHED") == 0) continue;
         swapOut(&procs[k]);
-        if (swapIn(&procs[pid - 1]) != -1) return 1;
+        if (swapIn(&procs[pid - 1]) != -1) {
+        snprintf(evtBuf, sizeof(evtBuf),
+                 "P%d swapped in — allocated memory [%d-%d]",
+                 pid, procs[pid-1].pcb.lowerBound, procs[pid-1].pcb.upperBound);
+        addLog(pid, evtBuf, "memory-swap");
+        return 1;
+        }
     }
 
     printf("[OS ERROR] Cannot swap in P%d\n", pid);
